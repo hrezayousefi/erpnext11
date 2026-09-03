@@ -1,0 +1,157 @@
+====================================================================
+راهنمای فنی فایل: setup_phase6.sh  (v3 — "FIXED v3")
+مسیر: erpnext/setup_phase6.sh   (1863 خط - مطالعه کامل شد)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+مهم‌ترین فاز عملیاتی پروژه: DocType واقعی و کامل Transport Case (پرونده
+حمل) با بیش از ۷۰ فیلد (طرفین، بار، مالی، مسیر، راننده/خودرو، بارنامه،
+باسکول، بیجک، ترخیص، تحویل، پرداخت‌ها، چک‌لیست بستن، یادداشت)، به همراه
+۵ DocType کمکی (Transport Payment به‌عنوان جدول فرزند، Transport
+Waybill، Transport Weighbridge، Transport Bijak، Transport Clearance)
+و یک Workflow ۲۴ حالته با بیش از ۲۰ گذار مشروط بر نوع پرونده (خرید/فروش).
+
+2) چرا "v3" / "FIXED"
+--------------------------------------------------------------------
+هدر فایل تصریح می‌کند این نسخه‌ی سوم اجرای واقعی است و مشکلات نسخه‌های
+قبلی را حل می‌کند:
+  FIX#1 - WorkflowPermissionError: در Frappe v15 نمی‌توان هنگام insert()
+    مستقیماً workflow_state غیر پیش‌فرض (Draft) گذاشت. راه‌حل: ثبت سند
+    با Draft، سپس فراخوانی `frappe.db.set_value(..., "workflow_state",
+    "Pending Supervisor Review", update_modified=False)` بلافاصله بعد
+    از insert — این الگو "Bridge Pattern" نامیده شده و در trade_case.py
+    (اصلاح‌شده در همین فایل) و در verify_phase6.py تکرار می‌شود.
+  FIX#2 - false-fail تست روی رشته "tc.status" داخل کامنت: تست verify
+    قبلی صرفاً با substring search رشته "tc.status" را پیدا می‌کرد حتی
+    اگر داخل کامنت بود؛ در این نسخه با regex دقیق
+    `r"\btc\.status\s*=\"` فقط assignment واقعی چک می‌شود.
+  FIX#3 - fixture name guard از v2 حفظ شده (بررسی هر آبجکت fixture باید
+    doctype+name داشته باشد وگرنه SystemExit).
+
+3) Controller اصلی: TransportCase(Document)
+--------------------------------------------------------------------
+before_insert():
+  - پرکردن خودکار posting_date/company
+  - "هرگز state غیر Draft در insert" (کامنت صریح)
+  - priority پیش‌فرض "متوسط" (نه اجباری - "OWNER DECISION")
+  - other_cost پیش‌فرض 0
+validate(): زنجیره‌ای از ۶ متد کمکی به این ترتیب:
+  _normalize_payments()      -> نرمال‌سازی شبا هر ردیف پرداخت +
+    frappe.throw اگر amount<=0
+  _validate_other_cost()     -> اگر other_cost>0، توضیح اجباری است
+  _calculate_totals()        -> فرمول واحد هزینه:
+      total_cost = freight+customs+clearance+other+initial+ Σpayments
+      estimated_profit = sales_amount - purchase_amount - total_cost
+    (نکته: در این نسخه هنوز پرداخت‌ها Σpayments داخل total_cost جمع
+    می‌شوند - این دقیقاً همان BUG است که در REQUIREMENTS_MATRIX نسخه‌ی
+    V3 میان‌فازی به‌عنوان "پرداخت دوباره جزو هزینه شمرده نشود" ذکر شده
+    و باید در نسخه‌های اصلاحی رفع شود؛ اینجا رفتار فعلی را عیناً ثبت
+    می‌کنیم، نه رفتار مطلوب.)
+    محاسبه‌ی net_weight و actual_tonnage از weight_full-weight_empty
+  _update_checklist()        -> ۷ چک‌باکس مخفی (chk_driver...
+    chk_payments) بر اساس داده‌های واقعی محاسبه می‌شوند (نه دستی)
+  _guard_stage_requirements() -> یک ماشین‌حالت validation: بسته به
+    workflow_state جاری، فیلدهای اجباری آن مرحله بررسی می‌شوند (راننده،
+    شماره بارنامه، باسکول، بیجک، ترخیص، رسید تخلیه، پرداخت، و در
+    "Completed" هر ۷ چک‌لیست + finance_approved + actual_tonnage>0)
+  _prevent_duplicate_payments() -> دو لایه: (الف) کلید ترکیبی در حافظه
+    (payment_type, sheba, amount, date) در همان سند (ب) کوئری SQL خام
+    join بین Transport Payment و Transport Case برای یافتن رکورد مشابه
+    در سایر پرونده‌ها با همان driver+waybill_number+payment_type+amount
+after_insert(): _auto_assign_by_case_type() -> بر اساس case_type
+  (خرید/فروش) کوئری SQL می‌زند تا اولین کاربر دارای نقش "Transport User
+  - Purchase" یا "- Sales" را پیدا کند، db_set می‌کند و
+  frappe.desk.form.assign_to.add فراخوانی می‌کند (اگر خطا داد silent
+  pass - چون ارجاع خودکار نباید ساخت سند را بشکند)
+on_update(): اگر workflow_state تغییر کرده و برابر "Pending Finance
+  Close" شد، db_set("sent_to_finance", 1)
+
+4) Bridge اصلاح‌شده در TradeCase.on_update()
+--------------------------------------------------------------------
+همان الگوی فاز ۵ اما اکنون Transport Case را با workflow_state پیش‌فرض
+(Draft) می‌سازد و بلافاصله با frappe.db.set_value حالت را به "Pending
+Supervisor Review" منتقل می‌کند (bridge به کارتابل سرپرست).
+
+5) Workflow (۲۴ حالت، >۲۰ گذار)
+--------------------------------------------------------------------
+حالت‌ها: Draft, Pending Supervisor Review, Pending Transport, Driver
+Assigned, Waybill Issued, In Transit, Waiting Weighbridge, Waiting
+Bijak, Waiting Clearance, Cleared, Delivered, Pending Payment, Pending
+Finance Close, Completed, On Hold, Cancelled, Rejected + ۷ حالت
+میراث‌شده از Workflow قدیمی Trade Case (که این‌جا هم به فیکسچر
+workflow_state.json اضافه می‌شوند، نکته مهم: فایل با پایتون این‌لاین
+merge می‌کند - `existing_ws` را می‌خواند و phase6_states را اضافه
+می‌کند، نه بازنویسی کامل - یک الگوی "merge-not-replace" برای فیکسچرها).
+گذارهای مشروط بر case_type با فیلد "condition": "doc.case_type=='خرید'"
+که موتور Workflow خود Frappe از این پشتیبانی می‌کند (Server-side eval
+شرط پایتونی روی doc).
+Purge صریح فایل‌های فیکسچر قدیمی نام‌گذاری اشتباه:
+transport_workflow_state.json و transport_workflow.json حذف می‌شوند تا
+تنها یک منبع واحد حقیقت (canonical fixture: workflow_state.json و
+workflow.json مشترک بین Trade Case و Transport Case) باقی بماند.
+
+6) DocTypeهای فرزند/کمکی
+--------------------------------------------------------------------
+- Transport Payment (istable=1، بدون permissions مستقل - چون جدول
+  فرزند سطح دسترسی از والد ارث می‌برد)
+- Transport Waybill (is_submittable=1؛ یکتایی شماره بارنامه با کوئری
+  frappe.db.exists با شرط docstatus != 2؛ on_submit() -> _sync_to_case()
+  که فیلدهای راننده/خودرو/کرایه/تناژ را روی Transport Case کپی می‌کند و
+  actual_tonnage را از tonnage بارنامه ست می‌کند - این دقیقاً همان
+  BUG_F_WBT_FIELD_MISMATCH است که در سند نیازمندی‌های V3 میان‌فازی به
+  عنوان مشکل شناخته‌شده ذکر شده: بارنامه actual_tonnage باسکول‌شده را
+  بازنویسی می‌کند)
+- Transport Weighbridge: net_weight و net_tonnage محاسبه‌شده در
+  validate()؛ on_update() اگر approval_status=="تاییدشده" باشد،
+  اطلاعات را به Transport Case منتقل می‌کند
+- Transport Bijak: اگر needs_bijak=="خیر" است status خودکار "بدون نیاز"
+  می‌شود؛ در غیر این صورت bijak_attachment و declaration_attachment
+  الزامی است
+- Transport Clearance: on_update() فیلدهای گمرکی را به Transport Case
+  کپی می‌کند
+
+7) Workspace به‌روزشده و verify_phase6.py
+--------------------------------------------------------------------
+setup_workspace_phase6.py مشابه الگوی فاز ۴ اما این‌بار ۳ کارت (اطلاعات
+پایه/عملیات حمل/بازرگانی) با ۱۲ لینک حداقلی. verify_phase6.py شامل
+تست‌های واقعاً end-to-end با ساخت سند واقعی Transport Case، append
+پرداخت، submit بارنامه، تست یکتایی بارنامه با insert دوم که باید Fail
+شود، و تست صریح الگوی Bridge (insert Draft -> db_set cartable state).
+
+8) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- Pre-migrate Fixture Guard: قبل از bench migrate یک اسکریپت پایتون
+  این‌لاین تمام فایل‌های fixtures/*.json را می‌خواند و اگر هر رکورد
+  doctype/name نداشته باشد با sys.exit(1) کل عملیات را متوقف می‌کند —
+  از میگریت با فیکسچر خراب جلوگیری می‌کند (fail-fast قبل از دست‌کاری
+  دیتابیس).
+- Client Script فرم (نوار پیشرفت اولیه با recalc در سمت کلاینت) - این
+  کلاینت‌ساید مجزا از سرور محاسبه می‌کند که خودش منبع بالقوه "دو موتور
+  محاسبه" (Client + Server) است؛ دقیقاً همین مشکل در سند V3 با عنوان
+  "Client Script نباید فرمول مستقل پیاده کند" ذکر شده است.
+
+9) وابستگی‌ها
+--------------------------------------------------------------------
+- کاملاً وابسته به فاز ۵ (Trade Case) و ir_base.utils.validators.
+- در فازهای بعدی، setup_phase84.sh فیلدهای فاکتور را به همین
+  Transport Case اضافه می‌کند و setup_phase9.sh رویدادهای تغییر state
+  را برای SMS/SLA گوش می‌دهد.
+
+10) خطرات / نقاط حساس شناخته‌شده (که در سند V3 هم تکرار شده)
+--------------------------------------------------------------------
+- BUG_F_WBT_FIELD_MISMATCH: بارنامه actual_tonnage باسکول را بازنویسی
+  می‌کند.
+- BUG_CHK_FINANCE_NAME: فیلد finance_approved به‌درستی همین نام را دارد
+  (نه chk_finance_approved) اما chk_purchase/chk_sales اصلاً در این
+  DocType تعریف نشده‌اند (در چک‌لیست بستن فقط ۷ آیتم است، نه ۱۰ آیتم
+  کامل مطابق سند V3).
+- WF_REJECTED_REACHABLE: در این Workflow، حالت Rejected تنها از Draft
+  قابل دسترسی است ("لغو") و هیچ گذار دیگری به Rejected نمی‌رسد.
+- WF_CANCEL_FROM_MIDDLE: فقط از Draft/Pending Supervisor Review قابل
+  لغو/تعلیق است، نه از مراحل میانی دیگر.
+- WF_SALES_DELIVERY_PAYMENT: مسیر فروش هم از تحویل و پرداخت عبور
+  می‌کند (گذارهای "ثبت تخلیه"/"ثبت پرداخت‌ها" برای هر دو
+  Transport User - Purchase و Transport User - Sales تعریف شده‌اند).
+====================================================================
+END

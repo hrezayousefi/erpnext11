@@ -1,0 +1,182 @@
+====================================================================
+راهنمای فنی فایل: setup_phase84.sh  ("setup_phase8.sh — FINAL /
+Smart Excel Sync Edition")
+مسیر: erpnext/setup_phase84.sh   (8026 خط - بزرگ‌ترین فایل پروژه -
+مطالعه کامل شد در ۵ بخش پیوسته)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+گزارش‌ها (Reports)، فرمت‌های چاپ RTL، و یک لایه‌ی بسیار پیشرفته‌ی
+Excel Import/Export دوگانه (استاندارد + اختصاصی مطابق قالب‌های واقعی
+کارفرما) به همراه یک کاراکتر مالی دقیق ۲۶ ستونی برای سال ۱۴۰۵. این
+فایل عملاً یک "زیرسیستم گزارش‌گیری و اکسل" کامل و مستقل است که چند
+هزار خط کد پایتون + JS تولید می‌کند.
+
+2) بخش‌های اصلی (به ترتیب مراحل step در اسکریپت)
+--------------------------------------------------------------------
+گام ۰ب) نصب وابستگی پایتون openpyxl>=3.1,<4 با bench pip (و ثبت در
+  requirements.txt اپ transport_ir).
+گام ۱) افزودن فیلدهای فاکتور به Trade Case و Transport Case: تابع
+  پایتونی upsert_fields(path, definitions, before_field) که با حفظ
+  ترتیب field_order موجود، فیلدهای جدید (sales_invoice_number,
+  sales_invoice_date, purchase_invoice_number, purchase_invoice_date,
+  sales_amount_usd) را idempotent اضافه/به‌روزرسانی می‌کند.
+گام ۲) phase8/events.py::sync_trade_invoice_fields(doc, method=None):
+  یک doc_event روی Trade Case.on_update که شماره/تاریخ فاکتور را به
+  همه‌ی Transport Caseهای فعال مرتبط (frappe.db.set_value گروهی) کپی
+  می‌کند - چون قالب‌های چاپ/پکینگ نباید نیاز به کوئری بین‌سندی داشته
+  باشند.
+گام ۳) utils/jinja_helpers.py: توابع فارسی‌سازی (fa_digits,
+  normalize_persian [G1 اصلی نرمال‌سازی فازی]، to_persian_digits,
+  fa_money, fa_date, latin_jalali_date, fa_datetime) که همگی صرفاً
+  Wrapper روی ir_jalali.utils.jalali.format_jalali هستند - یعنی این
+  فایل عمداً "منبع دوم تقویم" نمی‌سازد (verify_phase8 بعداً همین را چک
+  می‌کند: "No second _g2j implementation").
+گام ۴) merge هوکس با required_apps += ir_jalali، jinja.methods += ۵
+  تابع بالا، doc_events["Trade Case"]["on_update"] با merge امن (چک سه
+  حالت: خالی/لیست/تک‌مقدار) تا رویداد فاز ۵/۶ حذف نشود.
+گام ۵-۱۴) ۹ گزارش استاندارد Script Report (helper bash
+  make_report_json برای تولید JSON یکسان): Trade Transport 1405,
+  Freight Report, Customs Report, Tonnage Report, Profit Report,
+  Stalled Cases Report, Payments Report, Daily Summary Report, Packing
+  Report - هرکدام execute(filters) با دو حالت (تجمیعی گروه‌بندی‌شده یا
+  ردیف‌های خام) برمی‌گردانند.
+    - Trade Transport 1405: ۲۶ ستون دقیق (خرید/فروش کاملاً مستقل با
+      شمارنده‌های تجمعی جداگانه cumulative_sales_* و
+      cumulative_purchase_*)؛ shipped tonnage با اولویت actual_tonnage
+      سپس net_weight/1000.
+    - Profit Report: TRANSPORT_COST_JOIN زیرکوئری که هزینه واقعی
+      حمل‌ونقل مرتبط را جمع می‌زند و اگر هیچ Transport Case وجود
+      نداشت، fallback به هزینه‌های ثبت‌شده مستقیم روی Trade Case.
+    - Stalled Cases Report: با پارامتر minimum_hours/critical_hours و
+      سطح‌بندی severity (عادی/تأخیر/بحرانی).
+گام ۱۵) ۴ Print Format جدید (Jinja، RTL، جدول HTML دستی):
+  Trade Case Proforma, Transport Packing List, Transport Waybill
+  Print, Transport Weighbridge Print - همه با {{ fa_digits(...) }} و
+  {{ fa_date(...) }} برای نمایش فارسی صحیح.
+گام ۱۶) api/report_excel.py: لایه‌ی "استاندارد" اکسل با
+  FINANCE_ROLES/OPERATIONS_ROLES، توابع _new_workbook (RTL sheet)،
+  _style_header، _autosize، _finalize_table (freeze_panes+auto_filter)،
+  و متدهای whitelist شده: download_1405 (خروجی همان ۲۶ ستونی با ردیف
+  جمع کل هوشمند - RUNNING_TOTAL_FIELDS آخرین مقدار به‌جای sum)،
+  export_packing، export_carrier_statement، export_customs_statement،
+  export_proforma، download_proforma_template،
+  import_proforma_excel (Preview→Commit تراکنشی، محدودیت ۱۰MB و ۲۰۰۰
+  ردیف، rollback خودکار Frappe در صورت throw).
+گام ۱۷) دکمه‌های UI روی فرم/لیست Trade Case برای اکسل استاندارد.
+
+3) گام ۱۷.۵ — لایه‌ی اکسل سفارشی (بخش تکنیکی‌ترین فایل کل پروژه)
+--------------------------------------------------------------------
+api/report_excel_custom.py پیاده‌سازی دقیق یک سند "قوانین طلایی سینک
+اکسل" (Excel ⇄ ERPNext Smart Sync Golden Rules) با اولویت منبع حقیقت:
+  P0 قرارداد واقعی JSON اکسل (نام شیت، مختصات سلول، merge، ستون مخفی،
+     متن دقیق هدر، فرمول)
+  P1 فیلدهای واقعی Meta پروژه (هرگز fieldname ساختگی)
+  P2 قوانین فرآیندی پروژه
+  P3 alias/fuzzy فقط برای تشخیص، هرگز برای بازنویسی یا حدس مقصد
+
+اجزای کلیدی:
+- UNRESOLVED = None: هر ستونی که معادل تأییدشده در Meta ندارد، مقدار
+  آن به‌جای حدس زدن، None (سلول خالی) می‌ماند و در SyncLog با
+  status="unresolved" ثبت می‌شود.
+- HEADER_ALIASES: دیکشنری alias های شناخته‌شده‌ی تایپی کارفرما
+  ("هزنیه تخلیه"->"هزینه تخلیه", "پگینگ"->"پکینگ", ...) - "متن استاتیک
+  کارفرما هرگز اصلاح املایی نمی‌شود"؛ alias فقط برای تطبیق (matching)
+  استفاده می‌شود نه بازنویسی فایل خروجی.
+- SyncLog: کلاس ثبت ساختاریافته‌ی هر تصمیم mapping (sheet/cell/row/
+  field/raw/normalized/match_method/confidence/action/status/error) که
+  در پایان با frappe.logger("phase8_excel_sync") فلاش می‌شود - این
+  "قابلیت ممیزی" (auditability) کامل برای هر ستون/سطر است.
+- TEMPLATE_REGISTRY: پنج قالب دقیق کارفرما با مختصات سلول قفل‌شده:
+    financial (template_01, sheet "گزارش 1405", ۲۶ ستون A..Z، ستون‌های
+      مخفی I,J,K,M,U,V,W,Y، merge محافظت‌شده F1:G1/B1:B2/A1:A2)
+    freight (template_02, "خام لیست کرایه.xlsx"، ستون‌های مخصوص با
+      فرمول‌های محافظت‌شده G={row}=F*E، J=I+G، L=J-K - این فرمول‌ها
+      هرگز توسط سیستم بازنویسی نمی‌شوند، فقط استخراج/گسترش می‌شوند)
+    packing (template_03, "فرم پکینگ (1).xlsx"، تنها قالب LTR،
+      meta_cells با پیشوند دقیق مانند "INVOICE NUMBER: ")
+    purchase (template_04, "خام خرید.xlsx"، ۴ شیت الزامی از جمله
+      "پیش فاکتور خرید" و "صورت بارگیری" با کلید SUMIFS مشترک ستون C/D
+      که در فرمول محافظت‌شده IF/SUMIFS بازتولید می‌شود)
+    dispatch (template_05, "فایل خام.xlsx"، فرمول SUM ستون E)
+- توابع کمکی: _find_header_row (تشخیص هوشمند ردیف هدر با امتیازدهی به
+  الگوهای منطبق، اما اولویت اول همیشه coordinate اعلام‌شده)،
+  _build_column_mapping (نگاشت coordinate-locked)،
+  _unmerge_data_area/_clear_data_area (فقط ناحیه‌ی داده، هرگز
+  ناحیه‌ی عنوان/جمع)، _ensure_data_rows (درج ردیف با کپی استایل و کلون
+  فرمول با _shift_formula برای رفرنس‌های نسبی)، _resolve_link_smart
+  (تبدیل کلید Link به مقدار نمایشی خوانا با اولویت‌بندی
+  LINK_DISPLAY_PRIORITY).
+- پنج تابع export (export_financial_custom, export_freight_custom,
+  export_packing_custom, export_purchase_custom, export_dispatch_custom)
+  که با _load_and_fill_report یک نسخه‌ی درون‌حافظه‌ای از قالب واقعی
+  کارفرما (که در private/files/excel_templates/ باید از قبل staged
+  شده باشد - از پوشه‌ی excel_client_files کنار اسکریپت کپی می‌شود) پر
+  می‌کنند؛ فایل اصلی روی دیسک هرگز بازنویسی نمی‌شود (Export = Copy).
+- دو تابع import (import_purchase_custom, import_freight_custom) با
+  چرخه‌ی رسمی: Preview (mode="preview") -> Validate -> Resolve ->
+  Commit (mode="commit") transactional - در حالت commit اگر issues
+  وجود داشته باشد frappe.throw می‌زند و کل تراکنش توسط خود Frappe
+  rollback می‌شود (بدون commit دستی) - جلوگیری از "نیمه‌وارد شدن".
+  import_freight_custom مکانیزم match_method دوگانه برای یافتن
+  Transport Case مقصد دارد: اول با sales_invoice_number دقیق، سپس با
+  composite_identity (مرز-صاحب‌بار-نوع‌بار-راننده) اگر و فقط اگر دقیقاً
+  یک کاندید یافت شود (ابهام => رد سطر، نه حدس).
+
+4) گام ۱۸-۲۴ — ترجمه، Workspace، Setup/Verify نهایی
+--------------------------------------------------------------------
+- ادغام additive فیکسچر translation.json برای ۱۳ برچسب گزارش/چاپ.
+- افزودن دو کارت به هر Workspace فاز۷ (استاندارد/اختصاصی) با
+  link_type فقط از نوع Report (چون Workspace Link نمی‌تواند URL باشد)؛
+  حذف صریح لینک‌های قدیمی نامعتبر URL از اجرای رد شده‌ی قبلی.
+- setup_phase8.py::setup_phase8(): پاکسازی artifactهای رد شده،
+  backfill دو‌طرفه‌ی فیلد فاکتور با یک SQL UPDATE JOIN، و sync مجدد ۶
+  Workspace.
+- verify_phase8.py: ده‌ها چک شامل ۲۶ ستون دقیق گزارش 1405، جدایی واقعی
+  محاسبات خرید/فروش با داده‌ی synthetic، وجود Print Formatهای صحیح،
+  عدم وجود Print Format رد شده‌ی قدیمی (Waybill Print تکی)، API اکسل
+  اختصاصی، حفظ تایپوهای دقیق کارفرما در HEADER، حفظ فرمول‌ها،
+  required_apps شامل ir_jalali.
+- گام ۲۲: بررسی ساختاری قبل از migrate (پارس AST همه‌ی پایتون‌ها، تطبیق
+  نام پوشه‌ی گزارش با report_name کوچک‌شده با regex، تطبیق name==
+  report_name، اعتبار JSON فرمت‌های چاپ).
+
+5) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- "منبع واحد تقویم": این فایل به‌طور صریح یک تست دارد که مطمئن شود
+  هیچ پیاده‌سازی دوم الگوریتم تبدیل تقویم (_g2j) در کد اضافه نشده -
+  انضباط معماری در برابر duplication.
+- "قفل مختصات مقدم بر fuzzy؛ ابهام => UNRESOLVED": این یک اصل امنیتی
+  داده است که از "حدس اشتباه گران" (مثلاً نوشتن مبلغ در ستون اشتباه)
+  جلوگیری می‌کند؛ به‌جای throw کردن، فقط لاگ می‌کند و سلول را خالی
+  می‌گذارد.
+- الگوی shift فرمول با regex `(\$?[A-Za-z]{1,3})(\$?)(\d+)` که رفرنس
+  مطلق ($A$1) را دست‌نخورده و رفرنس نسبی را با دلتای ردیف می‌کشد.
+- منطق "insert_rows" با مدیریت صریح merged ranges (چون openpyxl به‌طور
+  خودکار محدوده‌های merge را هنگام insert_rows جابه‌جا نمی‌کند) - ابتدا
+  unmerge، سپس insert، سپس merge دوباره با shift دستی row.
+
+6) وابستگی‌ها
+--------------------------------------------------------------------
+- openpyxl (نصب‌شده در همین فایل)
+- ir_jalali.utils.jalali (فاز ir_jalali)
+- transport_ir.iran_transport.api.report_excel (پایه‌ی مشترک با لایه‌ی
+  اختصاصی - report_excel_custom این ماژول را import می‌کند)
+- تمام DocTypeهای فاز ۵/۶ (Trade Case، Transport Case، Transport
+  Payment، Transport Waybill)
+- private/files/excel_templates/*.xlsx (باید از خارج تأمین شود - این
+  فایل‌ها بخشی از مخزن گیت نیستند و باید کنار اسکریپت در
+  excel_client_files/ قرار گیرند)
+
+7) خطرات / نقاط حساس
+--------------------------------------------------------------------
+- اگر پوشه‌ی excel_client_files کنار اسکریپت پیدا نشود، فقط warn داده
+  می‌شود و لایه‌ی اکسل اختصاصی عملاً بدون قالب واقعی کار نمی‌کند (تابع
+  export در زمان اجرا frappe.throw می‌زند: "قالب ... یافت نشد").
+- حجم بسیار زیاد این فایل (۸۰۲۶ خط، بزرگ‌ترین در کل پروژه) نشان‌دهنده‌ی
+  تراکم منطق تجاری غیرمعمول در یک فاز است؛ برای نگهداری آینده باید به
+  چند فایل مجزا (per-template) شکسته شود، هرچند در نسخه‌ی فعلی همه‌چیز
+  در یک اسکریپت است.
+====================================================================
+END

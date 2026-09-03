@@ -1,0 +1,105 @@
+====================================================================
+راهنمای فنی فایل: setup_ir_base_phase2.sh
+مسیر: erpnext/setup_ir_base_phase2.sh   (625 خط - مطالعه کامل شد)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+اسکریپت "فاز ۱ + فاز ۲" پروژه. از یک بستر Bench خالی شروع می‌کند و تا
+پایان یک زیرساخت حداقلی ولی واقعی ERPNext v15/Frappe v15 پیش می‌رود:
+- بررسی نسخه‌ها و بکاپ سایت قدیمی (erp.local در صورت وجود)
+- راه‌اندازی bench start در پس‌زمینه (nohup) در صورت عدم اجرا
+- تنظیم global config بنچ (time_zone, language=fa, default_currency=IRR)
+- ساخت سایت جدید transport-dev.local فقط اگر وجود نداشته باشد (NO DROP)
+- نصب erpnext روی سایت + migrate + enable-scheduler
+- اعمال locale (fa / Asia-Tehran) فقط از طریق `bench execute` (نه bench
+  console و نه پایتون خام) روی System Settings و روی کاربر Administrator
+- ساخت اپ جدید `ir_base` (در صورت نبود) به‌صورت غیرتعاملی با ترتیب دقیق
+  سؤالات bench new-app در Frappe v15 (Title→Description→Publisher→
+  Email→License→GitHub Workflow) با `timeout 90` و `printf` لوله‌شده
+- ویرایش جراحی‌گونه (surgical) هوکس: کامنت‌کردن after_install فعال و
+  تزریق required_apps=["erpnext"]
+- Force-Replace فایل‌های utils/validators.py و DocType سه‌لایه
+  Iran Base Settings (Single DocType خالی برای نگه‌داشتن تنظیمات پایه)
+- install-app ir_base + migrate + تست‌های verify
+
+2) چرا این فایل مهم است (نقش در معماری کلی)
+--------------------------------------------------------------------
+این فایل "پایه اپلیکیشنی" (Foundation App) به نام ir_base را می‌سازد که
+تمام فازهای بعدی (transport_ir، ir_jalali، ir_gateway، ir_integration)
+روی توابع اعتبارسنجی آن (validators.py) تکیه می‌کنند:
+  - persian_to_english_digits
+  - validate_iranian_national_id  (چک‌سام کد ملی ایرانی، الگوریتم واقعی
+    وزن‌دهی ۱۰ تا ۲ + باقیمانده بر ۱۱)
+  - validate_iran_mobile (۱۱ رقم، شروع با 09)
+  - validate_sheba (الگوریتم استاندارد IBAN mod-97؛ چرخش ۴ کاراکتر اول
+    به انتها، تبدیل حروف به عدد با فرمول ord(ch)-55، سپس محاسبه باقی‌مانده
+    بر ۹۷ به‌صورت بلوک‌های ۷تایی)
+  - normalize_plate (نرمال‌سازی پلاک با حذف جداکننده‌ها)
+  - verify_validators() یک self-test کامل با ۱۶ سناریوی PASS/FAIL که در
+    پایان اسکریپت با `bench execute` فراخوانی می‌شود.
+
+3) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- write_utf8(): یک الگوی امن برای نوشتن فایل‌های UTF-8: ابتدا به یک
+  فایل موقت (mktemp) نوشته، اعتبار UTF-8 آن با iconv بررسی، سپس با mv
+  اتمی جایگزین مقصد می‌شود. این الگو در تمام اسکریپت‌های دیگر پروژه
+  تکرار شده و از "نیمه‌نوشته ماندن فایل" در صورت قطع اسکریپت جلوگیری
+  می‌کند.
+- site_has_app(): با grep -qE "^${app}([[:space:]]|$)" از تطبیق نادرست
+  اسم اپ‌های هم‌پیشوند (مثلاً ir_base با ir_base_extra) جلوگیری می‌کند.
+- "بدون drop-site": در طول کل پروژه هرگز از bench drop-site استفاده
+  نمی‌شود؛ ایجاد سایت فقط وقتی پوشه sites/<site> وجود ندارد انجام می‌شود.
+- Force-Replace اما نه Force-Recreate: اگر apps/ir_base از قبل باشد،
+  bench new-app دوباره اجرا نمی‌شود؛ فقط فایل‌های داخل آن (hooks.py،
+  validators.py، DocType) با write_utf8 بازنویسی می‌شوند. این الگوی
+  "Idempotent by Force-Replace" در همه اسکریپت‌های بعدی هم دیده می‌شود.
+- Locale صرفاً با bench execute frappe.db.set_value / set_single_value:
+  این قانون طلایی پروژه است — "no bench console، no raw python env/bin".
+- پاکسازی انحراف‌های احتمالی از تلاش‌های قبلی: حذف صریح install.py و
+  import_doctype.py (که در این پروژه به دلایل امنیتی/معماری ممنوع است،
+  چون after_install/install.py منجر به اجرای کد در زمان نصب می‌شود که
+  کنترل روی آن سخت‌تر است).
+
+4) وابستگی‌ها
+--------------------------------------------------------------------
+- bench 5.31 / Frappe v15 / ERPNext (باید از قبل روی بنچ نصب باشند؛
+  این اسکریپت آن‌ها را نصب نمی‌کند، فقط روی سایت جدید install-app
+  می‌کند)
+- python3 (برای json.tool اعتبارسنجی JSON و پارس AST غیرمستقیم)
+- iconv (اختیاری، برای اعتبارسنجی UTF-8)
+- خروجی این فایل پیش‌نیاز مستقیم setup_phase3.sh است (چک preflight در
+  phase3: بررسی وجود apps/ir_base و نبودِ ساختار دولایه اشتباه)
+
+5) ساختار فایلی تولیدشده
+--------------------------------------------------------------------
+apps/ir_base/ir_base/
+  hooks.py                    (required_apps=["erpnext"], after_install کامنت)
+  modules.txt                 -> "IR Base"
+  utils/__init__.py
+  utils/validators.py
+  ir_base/doctype/__init__.py
+  ir_base/doctype/iran_base_settings/
+    __init__.py
+    iran_base_settings.json   (Single DocType، فیلدهای default_country،
+                                default_calendar_hint، notes)
+    iran_base_settings.py     (کلاس خالی IranBaseSettings(Document))
+    test_iran_base_settings.py
+
+6) گیت‌های کیفی (Checklist انتهای اسکریپت)
+--------------------------------------------------------------------
+[ ] list-apps شامل frappe, erpnext, ir_base
+[ ] DocType Iran Base Settings موجود
+[ ] verify_validators خروجی 16 PASS / 0 FAIL بدهد
+[ ] یک commit گیت با پیام "phase 2: done"
+[ ] هیچ install.py و after_install فعالی نباشد
+
+7) خطرات/نقاط حساس
+--------------------------------------------------------------------
+- MYSQL_ROOT_PASSWORD به‌صورت هاردکد در ابتدای اسکریپت قرار دارد (مقدار
+  نمونه "as12") — باید پیش از اجرای واقعی جایگزین شود.
+- اسکریپت با `set -euo pipefail` اجرا می‌شود، یعنی هر خطای غیرمنتظره
+  باعث توقف کامل می‌شود؛ اکثر مراحل حیاتی با `|| err ...` یا `|| warn`
+  محافظت شده‌اند.
+====================================================================
+END

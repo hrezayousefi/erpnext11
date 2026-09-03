@@ -1,0 +1,151 @@
+====================================================================
+راهنمای فنی فایل: setup_realign_gate.sh  ("FINAL GATE — after phase 4")
+مسیر: erpnext/setup_realign_gate.sh   (1347 خط - مطالعه کامل شد)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+یک "دروازه‌ی نهایی تراز مجدد" بین فاز ۴ و فاز ۵: رفع دو باگ ریشه‌ای
+واقعی کشف‌شده در محیط تولید (ویزارد نصب Frappe که هویت کاربر را ربوده
+و Navbar بالای صفحه که به‌طور خودکار رندر نمی‌شود)، به‌علاوه ساخت شرکت،
+سال مالی، ۱۲ کاربر عملیاتی واقعی، و مجموعه‌ای از Property Setter/Custom
+Field/Translation برای پرداخت‌های فارسی به فرم‌های استاندارد ERPNext.
+
+2) دو "REAL FIX" اصلی (مستند در هدر فایل)
+--------------------------------------------------------------------
+REAL FIX 1 — دروازه‌ی واقعی ویزارد:
+  در Frappe v15، `frappe.is_setup_complete()` واقعاً از جدول
+  `tabInstalled Application.is_setup_complete` (برای اپ‌های frappe و
+  erpnext) می‌خواند، نه از System Settings.setup_complete که در نسخه‌های
+  قدیمی‌تر پرچم اصلی بود. اگر این پرچم صفر بماند، تابع کمکی ERPNext
+  به‌نام fin() (وقتی Company از قبل وجود دارد) مسیر
+  login_as_first_user(args) را صدا می‌زند که Session را به اولین کاربر
+  ساخته‌شده (مثلاً "خانم امینی") تغییر می‌دهد به‌جای Administrator - یک
+  Session Hijack واقعی. راه‌حل:
+    close_installed_app_gate(): برای frappe و erpnext رکورد
+    Installed Application را با is_setup_complete=1 و
+    has_setup_wizard=1 ست/می‌سازد.
+    kill_wizard_and_onboarding(): سه لایه را می‌بندد - (۱) Installed
+    Application (۲) System Settings.setup_complete=1 و
+    enable_onboarding=0 (۳) جداول Module Onboarding/Onboarding Step -
+    و در پایان کش تابع frappe.is_setup_complete (اگر cache_clear
+    داشته باشد) پاک می‌شود.
+    این تابع در seed_all() هم در ابتدا و هم در انتها فراخوانی می‌شود
+    ("Belt-and-suspenders" - دو بار برای اطمینان).
+
+REAL FIX 2 — Navbar گمشده:
+  باگ شناخته‌شده‌ی Frappe v15 (نصب‌های Docker) که گاهی
+  frappe.ui.toolbar.Toolbar به‌صورت خودکار instantiate نمی‌شود و نوار
+  بالای صفحه (جستجو/زنگ/آواتار) دیده نمی‌شود. راه‌حل شناخته‌شده‌ی
+  کامیونیتی (frappe_docker#1804):
+    `frappe.ui.toolbar_obj = new frappe.ui.toolbar.Toolbar();`
+  این پروژه این خط را در public/js/ensure_toolbar.js خودکار و امن
+  (فقط اگر navbar در DOM نبود و قبلاً ساخته نشده بود) اجرا می‌کند و آن
+  را با app_include_js دائمی می‌کند - "هرگز دستی در کنسول navbar
+  نساز؛ این فایل خودش انجام می‌دهد."
+
+3) setup_seeds.py — منطق seed کامل
+--------------------------------------------------------------------
+seed_all() ترتیب دقیق و آگاهانه‌ی مراحل (که هرکدام کامنت "چرا این
+ترتیب" دارد):
+  STEP1: kill_wizard_and_onboarding() - قبل از هر چیز (چون بدون آن
+    ساخت Company ممکن است session را hijack کند)
+  STEP2: restore_administrator() - سلامت Administrator (نقش System
+    Manager، بدون block_modules، عدم اتصال به Employee)
+  STEP3: ensure_warehouse_type("Transit") - "Transit قبل از Company"
+    (کامنت صریح در چند جای فایل تکرار شده؛ چون بدون Warehouse Type
+    از پیش موجود، بعضی اعتبارسنجی‌های خودکار Company/Warehouse
+    ERPNext ممکن است شکست بخورد)
+  STEP4: ensure_company() - فقط اگر شرکت "شرکت بازرگانی ایران" وجود
+    نداشت می‌سازد؛ سپس cleanup_wizard_residue() هر شرکت اضافی دیگر
+    (باقی‌مانده از ویزارد) را که تراکنش مالی ندارد حذف می‌کند، و
+    drop_stale_unique_index() یک ایندکس یکتای اشتباه احتمالی روی
+    Driver.custom_national_id را با SQL خام drop می‌کند (چون این فیلد
+    باید فقط با validate پایتون یکتا باشد نه با قید دیتابیس، طبق
+    تصمیم معماری صریح‌شده).
+  STEP5: ensure_users() - ۱۲ کاربر عملیاتی واقعی از روی
+    USER_ROLE_MAP + secrets.env (رمزها/ایمیل‌ها هرگز هاردکد نمی‌شوند،
+    از فایل secrets.env که در .gitignore قرار دارد خوانده می‌شوند)؛
+    PROTECTED_USERS={"Administrator","Guest"} - اسکریپت هرگز این دو
+    را دست‌کاری نمی‌کند حتی اگر در secrets.env اشتباهاً درج شوند.
+  STEP6: ensure_fiscal_year("1405", ...) - سال مالی با SQL خام برای
+    لینک شرکت (Fiscal Year Company) چون به‌نظر می‌رسد APIهای استاندارد
+    گاهی این لینک را درست ثبت نمی‌کنند؛ سال‌های مالی دیگر که با بازه‌ی
+    1405 تداخل دارند و شرکتی به آن‌ها لینک نیست، disabled می‌شوند.
+  STEP7 (پایانی): set_company_defaults - سه روش موازی برای تضمین:
+    frappe.defaults.set_global_default + INSERT مستقیم در
+    tabDefaultValue (چون کش/API گاهی به‌موقع اعمال نمی‌شود) +
+    Global Defaults doc.save() - "چون کش Frappe v15 گاهی مقدار تنظیم‌
+    شده با API را فوراً منعکس نمی‌کند."
+  و در پایان kill_wizard_and_onboarding() دوباره فراخوانی می‌شود.
+
+4) ۱۲ کاربر واقعی (secrets.env / secrets.env.template)
+--------------------------------------------------------------------
+ceo@irbco.local (مدیرعامل)
+fin.mgr@irbco.local (مدیر مالی)
+ehsan.nahalparvar@irbco.local (احسان نهال‌پرور - Finance Supervisor)
+faezeh.heydari@irbco.local (فائزه حیدری - Finance User)
+pouya.soleimani@irbco.local (پویا سلیمانی - Legal Reviewer)
+atieh.alaei@irbco.local (عطیه اعلایی - Treasury User)
+zahra.mirzaei@irbco.local (زهرا میرزایی - Receivables User)
+najmeh.afrashtehpour@irbco.local (نجمه افراشته‌پور - Transport
+  Supervisor)
+amini@irbco.local (خانم امینی - Transport User - Purchase)
+mohaddeseh.enayati@irbco.local (محدثه عنایتی - Transport User - Sales)
+mohammadi@irbco.local (آقای محمدی - Customs Officer)
+saeed.yousefi@irbco.local (سعید یوسفی - Document Signer)
+این نگاشت دقیق نام/ایمیل با نقش، مرجع مستقیم است برای فازهای بعدی که
+به کاربران واقعی اشاره می‌کنند (مثلاً سند V3 که از "هادی کرمیان" و
+"سعید یوسفی" به‌عنوان مدیرعامل و امضاکننده نام می‌برد).
+
+5) Property Setter و Custom Field
+--------------------------------------------------------------------
+Property Setter روی Vehicle (مخفی‌کردن make/model/last_odometer/
+fuel_type/fuel_uom/carbon_check_date که برای این پروژه بی‌ربطند، اجباری
+کردن license_plate، quick_entry=0 برای Vehicle/Driver) + یکتایی
+in_list_view روی Driver.full_name/cell_number/status.
+Custom Field گسترده‌تر از فاز ۴ (custom_is_smart_driver،
+custom_license_number/expiry، custom_vehicle Link به Vehicle با
+fetch_from پلاک).
+
+6) Patch DocType و Workspace (مرحله ۶)
+--------------------------------------------------------------------
+یک اسکریپت پایتون این‌لاین patch_doctype() به چهار DocType فاز۴
+(border, carrier, customs_broker, border_representative) اجازه‌ی
+allow_rename می‌دهد و دسترسی read+report را برای ۶ نقش مالی
+(Finance User...Receivables User) تضمین می‌کند - این تابع، هر بار،
+حتی اگر role از قبل در permissions باشد، فیلدهای read/report را
+force می‌کند (idempotent-safe patch).
+
+7) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- resolve_company() در verify_realign.py: یک زنجیره‌ی fallback ۴
+  لایه‌ای (global_default -> db.get_default -> Global Defaults Single
+  -> جستجوی مستقیم Company با abbr=IRBCO -> نام فارسی مستقیم) برای
+  یافتن شرکت پیش‌فرض - نشان‌دهنده‌ی بی‌اعتمادی آگاهانه به یک منبع واحد
+  به‌خاطر رفتار ناپایدار کش Frappe.
+- verify_realign() یک تست منفی صریح دارد: چهار مقدار نامعتبر
+  (کد ملی تکراری‌رقم، موبایل غیر 09، شبای صفر) باید توسط
+  validators.py رد شوند - این تنها فایلی از میان ۱۳ فایل است که چنین
+  حلقه‌ی تست منفی صریح چندگانه دارد.
+- بررسی "دقیقاً یک شرکت وجود دارد" (len(companies)==1) به‌عنوان یک
+  Invariant اکید سیستم پس از پاک‌سازی باقی‌مانده‌های ویزارد.
+
+8) وابستگی‌ها
+--------------------------------------------------------------------
+- Preflight: نیازمند وجود apps/transport_ir/.../doctype/border/
+  border.json (یعنی فاز ۴ باید کامل اجرا شده باشد).
+- خروجی این فاز (شرکت، سال مالی، ۱۲ کاربر، gate بسته) پیش‌نیاز مطلق
+  فاز ۵ به بعد است؛ بدون این فاز، ساخت هر سند مالی (Trade Case) با
+  خطای "شرکت پیش‌فرض مشخص نشده" مواجه می‌شود.
+
+9) خطرات / نقاط حساس
+--------------------------------------------------------------------
+- secrets.env با رمزهای پیش‌فرض "ChangeMe_*_1405" اگر واقعاً در تولید
+  استفاده شود یک ریسک امنیتی جدی است؛ اسکریپت هیچ اجباری برای تغییر
+  این رمزها اعمال نمی‌کند، فقط warn می‌دهد.
+- git tag foundation-v1 روی هر دو ریپوی ir_base و transport_ir؛ اگر
+  این تگ از قبل وجود داشت، حذف و دوباره ساخته می‌شود (idempotent اما
+  تاریخچه‌ی تگ گم می‌شود).
+====================================================================
+END

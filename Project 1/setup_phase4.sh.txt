@@ -1,0 +1,106 @@
+====================================================================
+راهنمای فنی فایل: setup_phase4.sh
+مسیر: erpnext/setup_phase4.sh   (495 خط - مطالعه کامل شد)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+اولین DocTypeهای واقعی عملیاتی پروژه ساخته می‌شوند: داده‌های پایه
+(Master Data) شامل Border (مرز)، Carrier (باربری)، Customs Broker
+(ترخیص‌کار)، Border Representative (نماینده مرز). همچنین به DocTypeهای
+استاندارد ERPNext (Driver، Vehicle، Item، Customer، Supplier) فیلدهای
+سفارشی (Custom Field) اضافه می‌شود و Workspace فاز ۳ با محتوای واقعی
+force-sync می‌شود.
+
+2) توابع/ماژول‌های کلیدی
+--------------------------------------------------------------------
+- validations/master_data.py:
+    validate_master_mobile(doc, method=None): موبایل و شبا هر
+      DocType مشترک (Carrier/Customs Broker/...) را نرمال و اعتبارسنجی
+      می‌کند؛ از ir_base.utils.validators استفاده می‌کند.
+    validate_driver(doc, method=None): کد ملی راننده را نرمال، اعتبار
+      و یکتایی آن را با یک کوئری frappe.db.exists با شرط
+      name != doc.name بررسی می‌کند (یکتایی سطح Application، نه سطح
+      دیتابیس - چون در فاز بعد Property Setter صریحاً unique=0 روی این
+      فیلد اعمال می‌شود تا از قفل‌شدگی دیتابیس جلوگیری شود).
+    validate_vehicle(doc, method=None): مشابه بالا برای پلاک خودرو با
+      normalize_plate.
+
+- ۴ DocType جدید (border, carrier, customs_broker,
+  border_representative) هرکدام با فایل .json/.py/test_*.py استاندارد
+  سه‌فایلی Frappe. Border دارای autoname="field:border_name"،
+  border_type انتخابی (زمینی/دریایی/هوایی/ریلی).
+
+- fixtures/custom_field.json: افزودن فیلدهای فارسی به DocTypeهای هسته
+  ERPNext مانند Driver.custom_national_id، Vehicle.custom_vehicle_type،
+  Item.custom_thickness_mm، Customer.custom_preferred_border،
+  Supplier.custom_is_factory — این الگو ("Custom Field به‌جای Core
+  Fork") در تمام پروژه برای گسترش DocTypeهای استاندارد ERPNext بدون
+  دست‌کاری هسته تکرار می‌شود.
+
+- setup_workspace_phase4.py::setup_workspace_phase4(): تابعی که فایل
+  JSON ورک‌اسپیس را می‌خواند و با `frappe.get_doc`/`frappe.new_doc`
+  به‌صورت برنامه‌ای (نه صرفاً fixture sync خودکار Frappe) روی دیتابیس
+  اعمال می‌کند؛ در پایان اگر تعداد لینک‌ها کمتر از ۷ باشد frappe.throw
+  می‌زند — یک self-check سخت‌گیرانه.
+
+- verify_phase4.py::verify_phase4(): ۱۵ چک شامل وجود DocType، شمارش
+  Border==6، وجود Custom Fieldها، رد شدن کد ملی نامعتبر، و بررسی محتوای
+  JSON کارت Workspace.
+
+3) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- "Force-sync Workspace به‌جای اتکا به fixtures خودکار": نویسنده به‌جای
+  اعتماد کامل به مکانیزم fixtures استاندارد Frappe (که گاهی هنگام
+  migrate با ترتیب اجرا مشکل دارد)، یک تابع دستی نوشته که پس از
+  migrate با bench execute صدا زده می‌شود تا اطمینان حاصل شود Workspace
+  دقیقاً با JSON منطبق است. این الگو ("force sync + verify" به‌جای
+  "فقط امیدوار بودن به fixtures") در چند فاز دیگر هم دیده می‌شود
+  (مثلاً setup_phase7.sh::setup_ui_phase7).
+- `doc.flags.ignore_validate = True` هنگام ساخت Workspace استفاده شده
+  تا اعتبارسنجی‌های پیش‌فرض ERPNext روی Workspace (که گاهی سخت‌گیرانه
+  هستند) مانع نصب خودکار نشوند.
+- محتوای Workspace به‌صورت رشته JSON دستی نوشته می‌شود
+  (`"content": "[{\"id\":\"card_master\"...}]"`) نه یک ساختار پایتونی –
+  چون فیلد content در DocType Workspace از نوع Long Text است و باید
+  دقیقاً یک رشته JSON معتبر باشد.
+
+4) وابستگی‌ها
+--------------------------------------------------------------------
+- وابسته به ir_base.utils.validators (فاز ۲) و به ساختار پایه
+  transport_ir/iran_transport ساخته‌شده در فاز ۳.
+- DocType Border که اینجا ساخته می‌شود، در فازهای بعدی (۶، ۸، ۱۰، ۱۲)
+  به‌عنوان Link در Transport Case/Trade Case استفاده می‌شود.
+
+5) ساختار فایلی تولیدشده
+--------------------------------------------------------------------
+apps/transport_ir/transport_ir/iran_transport/
+  validations/master_data.py
+  doctype/border/{border.json,border.py,test_border.py}
+  doctype/carrier/{...}
+  doctype/customs_broker/{...}
+  doctype/border_representative/{...}
+apps/transport_ir/transport_ir/fixtures/custom_field.json
+apps/transport_ir/transport_ir/fixtures/border.json  (۶ مرز: بازرگان،
+  مهران، شلمچه، دوغارون، آستارا، پرویزخان)
+apps/transport_ir/transport_ir/iran_transport/setup_workspace_phase4.py
+apps/transport_ir/transport_ir/iran_transport/verify_phase4.py
+
+6) گیت‌های کیفی
+--------------------------------------------------------------------
+انتظار می‌رود verify_phase4 => "Passed: 15  Failed: 0"
+[ ] /app/border -> ۶ مرز
+[ ] Workspace حمل و نقل -> کارت «اطلاعات پایه» با ۶ لینک
+[ ] فرم Driver -> بخش «اطلاعات ایران»
+[ ] کد ملی 1234567890 -> خطا
+[ ] موبایل 08123456789 -> خطا
+
+7) خطرات / نقاط حساس
+--------------------------------------------------------------------
+- doc_events در hooks.py برای اولین بار در این فاز تعریف می‌شود
+  (Driver.validate و Vehicle.validate) — نویسنده‌های فازهای بعدی باید
+  با merge کردن (نه بازنویسی) doc_events این دیکشنری را گسترش دهند، وگرنه
+  اعتبارسنجی‌های این فاز از بین می‌روند (این دقیقاً همان الگویی است که
+  در setup_phase10.5.sh با کامنت هشدار صریح مستند شده است).
+====================================================================
+END

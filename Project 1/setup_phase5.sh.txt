@@ -1,0 +1,94 @@
+====================================================================
+راهنمای فنی فایل: setup_phase5.sh
+مسیر: erpnext/setup_phase5.sh   (683 خط - مطالعه کامل شد)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+اولین DocType تجاری واقعی پروژه: Trade Case (پرونده تجاری) با فیلدهای
+کامل (طرفین، کالا، مشخصات بار، مالی، مسیر، اسناد) به همراه یک
+Transport Case ساده (نسخه‌ی اولیه، بعداً در فاز ۶ کاملاً بازنویسی
+می‌شود) و یک Workflow ۱۰ حالته با ۱۵ گذار (transition).
+
+2) معماری Controller
+--------------------------------------------------------------------
+class TradeCase(Document):
+  before_insert(): پرکردن خودکار posting_date و company در صورت خالی
+    بودن (چون این دو فیلد در فرم مخفی/فقط‌خواندنی هستند، Backend باید
+    ضمانت پر شدن آن‌ها را در مسیرهای API/Import هم بدهد؛ کامنت صریح
+    "UX DEVIATION" این تصمیم را توضیح می‌دهد).
+  validate(): "Signature Guard" — اگر workflow_state در یکی از
+    states_requiring_signature باشد (Pending Signature، Finance
+    Supervisor، Receivables، Approved) و signed_document خالی باشد،
+    frappe.throw می‌زند.
+  on_update(): "Auto-Create Transport Case" - وقتی workflow_state به
+    "Approved" برسد (و has_value_changed("workflow_state") True باشد)
+    یک Transport Case جدید با انتقال کامل تمام فیلدها ساخته می‌شود؛
+    anti-duplicate با بررسی وجود یک Transport Case فعال (غیر
+    Cancelled/Rejected) برای همین trade_case انجام می‌شود.
+
+3) Workflow (fixtures/workflow.json + workflow_state.json)
+--------------------------------------------------------------------
+۱۰ حالت: Draft, Legal Review, Treasury Review, Pending Signature,
+Finance Supervisor, Receivables, Approved, Rejected, Returned, On Hold
+۱۵ گذار شامل مسیرهای رد/بازگشت/تعلیق و از سرگیری.
+نکته حیاتی معماری (مستند در کامنت‌های فایل با عنوان CRITICAL FIX):
+allow_edit و allowed در Frappe v15 از نوع Link هستند و فقط یک نقش را
+می‌پذیرند (نه رشته چندخطی \n جدا شده با چند نقش)؛ System Manager به‌طور
+پیش‌فرض دسترسی کامل دارد پس نیازی به ذکر آن نیست.
+
+4) تست خودکار (verify_phase5.py)
+--------------------------------------------------------------------
+شامل ۷ گروه تست:
+  ۱) Backend Guarantee (شرکت/تاریخ خودکار پر می‌شوند حتی بدون مقداردهی)
+  ۲) Signature Guard (فراخوانی مستقیم validate() بدون عبور از موتور
+     Workflow، برای تست عمدی Guard)
+  ۳) Auto-Create با انتقال کامل فیلد به فیلد (thickness، dimensions،
+     purchase_amount، destination، transport_type، delivery_type و...)
+  ۴) Anti-Duplicate (فراخوانی دوباره‌ی on_update() نباید Transport Case
+     دوم بسازد)
+  ۵) کامل بودن ۱۰ Workflow State
+  ۶) وجود Workflow
+  ۷) بررسی صریح که هیچ‌کدام از allow_edit/allowed حاوی کاراکتر \n
+     (یعنی چند نقش در یک ردیف) نیستند — یک regression test مستقیم
+     برای باگی که در نسخه‌های قبلی رخ داده بود.
+در پایان به‌جای frappe.throw از sys.exit(1) استفاده می‌شود که کامنت
+توضیح می‌دهد چرا: "sys.exit(1) به جای frappe.throw در verify" -
+frappe.throw باعث می‌شود bench execute پیام‌های exception طولانی چاپ
+کند در حالی که sys.exit(1) صرفاً کد خروج غیرصفر می‌دهد و خروجی
+خواناتر باقی می‌ماند.
+
+5) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- Preflight با frappe.db.count به‌جای frappe.db.exists: کامنت صریح
+  "FIX: frappe.db.exists برمی‌گرداند NAME (مثلاً 'CEO')، نه '1'.
+  استفاده از frappe.db.count که عدد برمی‌گرداند." - این یک باگ واقعی
+  کشف‌شده در حین توسعه بوده که در همین فایل مستند و رفع شده است.
+- انتظار Redis روی پورت داینامیک: پورت redis_cache از فایل
+  config/redis_cache.conf خوانده می‌شود (نه هاردکد 13000)، با fallback
+  به 13000 اگر فایل کانفیگ موجود نبود.
+- Client Script برای UX (تنظیم خودکار Company هنگام باز شدن فرم جدید و
+  نمایش comment رنگی "شرکت: X") - نمونه‌ی اول استفاده از Client Script
+  فیکسچر در پروژه.
+
+6) وابستگی‌ها
+--------------------------------------------------------------------
+- به ۱۲ نقش فاز ۳ کاملاً وابسته (Preflight آن‌ها را چک می‌کند).
+- خروجی این فاز (Trade Case + Transport Case ساده + Workflow) در فاز ۶
+  کاملاً گسترش/بازنویسی می‌شود (منطق bridge فاز ۶ مستقیماً جایگزین
+  trade_case.py این فاز می‌شود).
+
+7) گیت‌های کیفی
+--------------------------------------------------------------------
+انتظار خروجی: "Passed: 24+ | Failed: 0"
+
+8) خطرات / نقاط حساس
+--------------------------------------------------------------------
+- در نسخه‌ی این فاز، on_update مستقیماً workflow_state=Pending
+  Supervisor Review را روی Transport Case ست نمی‌کند (چون در این فاز
+  چنین حالتی وجود ندارد)؛ اما همین الگوی "insert مستقیم با حالت غیر
+  پیش‌فرض" در فاز ۶ باعث WorkflowPermissionError شد و باید با الگوی
+  "insert Draft سپس db_set" اصلاح شود (این خودِ اصلاح در فایل فاز۶
+  مستند است).
+====================================================================
+END

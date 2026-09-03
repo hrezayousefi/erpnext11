@@ -1,0 +1,879 @@
+================================================================================
+مستند فنی کامل — فایل‌های بنیادی پروژه Iran Transport ERP (ERPNext v15/Frappe v15)
+================================================================================
+تهیه‌شده بر اساس مطالعه خط‌به‌خط (خط اول تا خط آخر، بدون حذف/خلاصه‌سازی) دقیقاً
+همان ۱۳ فایلی که درخواست شده بود. هیچ فایل دیگری از مخزن (0.txt..4.txt, 0s.txt,
+mid-phases, mid-phases-v2, mid-phases-v3, fix/, *.sh.txt, TECHNICAL_CODEX.txt)
+در این مرحله مطالعه یا استفاده نشده — دقیقاً طبق دستور صریح کاربر.
+
+فایل‌های مطالعه‌شده (مسیر دقیق در ریشه مخزن erpnext/):
+  1. erpnext/setup_ir_base_phase2.sh      (625 خط)
+  2. erpnext/setup_ir_jalali2.sh          (431 خط)
+  3. erpnext/setup_phase3.sh              (468 خط)
+  4. erpnext/setup_phase4.sh              (495 خط)
+  5. erpnext/setup_phase5.sh              (683 خط)
+  6. erpnext/setup_phase6.sh              (1863 خط)
+  7. erpnext/setup_phase7.sh              (1351 خط)
+  8. erpnext/setup_phase84.sh             (8026 خط)  [بزرگ‌ترین فایل — فاز ۸ نهایی]
+  9. erpnext/setup_phase9.sh              (3110 خط)
+ 10. erpnext/setup_phase10.sh             (1843 خط)
+ 11. erpnext/setup_phase10.5.sh           (869 خط)   [محتوای داخلی خود را «Phase 11» می‌نامد]
+ 12. erpnext/setup_realign_gate.sh        (1347 خط)
+ 13. erpnext/transport_erp.sh             (3291 خط)  [محتوای داخلی خود را «setup_phase12_v2.sh» می‌نامد]
+
+جمع کل خطوط مطالعه‌شده این ۱۳ فایل: ۲۴٬۴۰۲ خط (تطابق کامل با wc -l ≈ 24389 با
+اختلاف جزئی ناشی از شمارش خط پایانی فایل). تمام خطوط بدون استثنا رؤیت شدند.
+
+--------------------------------------------------------------------------------
+۱) نقشهٔ کلی معماری Frappe/ERPNext این پروژه
+--------------------------------------------------------------------------------
+
+                                Frappe v15
+                                    │
+                                ERPNext v15
+                                    │
+        ┌──────────────┬───────────┼───────────────┬─────────────────┐
+        │              │           │               │                 │
+     ir_base       ir_jalali   transport_ir     ir_gateway       ir_integration
+   (فاز ۱-۲)        (تقویم)    (اپ اصلی کسب‌وکار)  (فاز ۹)          (فاز ۱۰A)
+        │              │           │               │                 │
+   Iran Base       Jalali UI   Iran Transport   IR Gateway        IR Integration
+   Settings        (Shamsi     (ماژول اصلی)     (SMS/SLA/Alert)   (Sepidar Adapter)
+   + validators    نمایش/       │
+   (کد ملی، موبایل، میلادی      │
+    شبا، پلاک)      ذخیره)      │
+                                 │
+   required_apps زنجیره‌ای:
+     ir_base        → []                (فقط erpnext)
+     ir_jalali       → []                (مستقل، فقط frappe/erpnext ضمنی)
+     transport_ir    → [frappe, erpnext, ir_base]  (فاز ۳) سپس ir_jalali اضافه می‌شود (فاز ۸)
+     ir_gateway      → [frappe, erpnext, ir_base, transport_ir]
+     ir_integration  → [frappe, erpnext, ir_base, transport_ir, ir_jalali, ir_gateway]
+
+نکتهٔ حیاتی: SITE_NAME ثابت در همهٔ اسکریپت‌ها = "transport-dev.local"
+BENCH_DIR ثابت = "${HOME}/frappe-bench"
+
+--------------------------------------------------------------------------------
+۲) ترتیب واقعی اجرای فازها (همان‌طور که در preflightهای هر اسکریپت تصریح شده)
+--------------------------------------------------------------------------------
+
+  setup_ir_base_phase2.sh   (فاز ۱+۲: ir_base + Iran Base Settings)
+          │
+  setup_phase3.sh           (Role fixture در ir_base + اسکلت transport_ir + Workspace خالی)
+          │
+  setup_phase4.sh           (Master Data: Border/Carrier/CustomsBroker/BorderRepresentative
+                             + Custom Field روی Driver/Vehicle/Item/Customer/Supplier
+                             + validations/master_data.py + Workspace force-sync)
+          │
+  setup_realign_gate.sh     (REALIGN-GATE: قبل از فاز ۵! بستن Wizard واقعی،
+                             ساخت Company/Fiscal Year/۱۲ کاربر عملیاتی،
+                             Property Setter روی Vehicle/Driver، ensure_toolbar.js)
+          │
+  setup_ir_jalali2.sh       (اپ ir_jalali: تقویم جلالی — بین realign_gate و phase5)
+          │
+  setup_phase5.sh           (Trade Case کامل + Transport Case اسکلتی + Workflow
+                             ۱۰-حالته Trade Case + Auto-Create Transport Case)
+          │
+  setup_phase6.sh           (Transport Case عملیاتی کامل + کودک‌DocTypeها
+                             + Workflow ۲۴-حالته Transport Case + محاسبات مالی)
+          │
+  setup_phase7.sh           (UI/UX: ۶ Workspace نقش‌محور + داشبورد KPI مدیرعامل)
+          │
+  setup_phase84.sh          (فاز ۸ نهایی: گزارش‌ها، Print Formatها،
+                             Excel استاندارد + لایهٔ Excel اختصاصی Golden-Rules)
+          │
+  setup_phase9.sh           (اپ ir_gateway: SMS/SLA/Alert — پلاگین Adapter)
+          │
+  setup_phase10.sh          (اپ ir_integration: هاب مالی — Sepidar Adapter, Dry-Run)
+          │
+  setup_phase10.5.sh        (Phase 11 داخلی: چندبارگیری روی Trade Case — Additive)
+          │
+  transport_erp.sh          (Phase 12: ۵ داشبورد اختصاصی + ۵ Workspace فرماندهی)
+
+--------------------------------------------------------------------------------
+۳) درخت فایل‌های تولیدشده توسط هر اسکریپت (خروجی واقعی روی دیسک)
+--------------------------------------------------------------------------------
+
+### 3.1 setup_ir_base_phase2.sh → apps/ir_base/
+
+apps/ir_base/
+└── ir_base/
+    ├── hooks.py                      (required_apps=["erpnext"], app_color، fixtures بعداً در فاز۳)
+    ├── modules.txt                   ("IR Base")
+    └── ir_base/
+        ├── __init__.py
+        ├── utils/
+        │   ├── __init__.py
+        │   └── validators.py         ← تابع‌های خالص:
+        │        persian_to_english_digits()
+        │        validate_iranian_national_id()   (الگوریتم چک‌دیجیت واقعی ۱۰رقمی)
+        │        validate_iran_mobile()            (۱۱رقمی، شروع با 09)
+        │        validate_sheba()                  (چک‌سام IR + mod-97)
+        │        normalize_plate()
+        │        verify_validators()   (خودآزمون داخلی، ۱۶+ تست)
+        └── doctype/
+            ├── __init__.py
+            └── iran_base_settings/
+                ├── __init__.py
+                ├── iran_base_settings.json   (Single DocType، فقط System Manager)
+                ├── iran_base_settings.py
+                └── test_iran_base_settings.py
+
+نکته کلیدی معماری: توابع validate_* در ir_base «خالص» و بدون وابستگی به
+DocType خاص هستند — طوری طراحی شده‌اند که در فازهای بعدی (phase4, phase6,
+realign_gate) توسط transport_ir دوباره import و استفاده شوند
+(from ir_base.utils.validators import ...).
+
+### 3.2 setup_ir_jalali2.sh → apps/ir_jalali/
+
+apps/ir_jalali/
+└── ir_jalali/
+    ├── hooks.py     (app_include_js/css سه فایل JS + jinja.methods: jalali, jalali_fa)
+    ├── modules.txt  ("IR Jalali")
+    └── ir_jalali/
+        ├── utils/
+        │   ├── __init__.py
+        │   └── jalali.py       ← الگوریتم مرجع Jalaali↔Gregorian (خالص پایتون)
+        │        to_jalaali() / to_gregorian()
+        │        format_jalali() / format_jalali_fa()
+        │        jalali() / jalali_fa()  (رَپِرهای Jinja — نام تابع=کلید Jinja)
+        │        test_jalali()  (۴ بردار تست تاریخ ثابت)
+        └── public/
+            ├── js/
+            │   ├── jalali_core.js       (پورت ۱:۱ الگوریتم به جاوااسکریپت)
+            │   ├── jalali_picker.js     (ویجت تقویم پاپ‌آپ RTL)
+            │   └── controls_patch.js    (پچ frappe.ui.form.ControlDate —
+            │                             نمایش شمسی، ذخیرهٔ میلادی)
+            └── css/
+                └── jalali_picker.css
+
+اصل طراحی: «UI شمسی، ذخیرهٔ میلادی» — این تنها موتور تقویم مجاز است؛
+فاز ۸ صراحتاً تأیید می‌کند «Jalali uses ir_jalali single source» و از وجود
+پیاده‌سازی دوم (_g2j) در transport_ir جلوگیری می‌کند.
+
+### 3.3 setup_phase3.sh → افزودن به ir_base + اسکلت transport_ir
+
+apps/ir_base/ir_base/
+└── fixtures/
+    └── role.json        (۱۲ نقش Custom: CEO, Financial Manager, Finance Supervisor,
+                           Finance User, Legal Reviewer, Treasury User,
+                           Receivables User, Transport Supervisor,
+                           Transport User - Purchase, Transport User - Sales,
+                           Customs Officer, Document Signer)
+apps/ir_base/ir_base/hooks.py  (+= fixtures=[{"dt":"Role","filters":[...12 names...]}])
+
+apps/transport_ir/
+├── BACKLOG.md    (چت سازمانی/نقشه تعاملی/WhatsApp = صراحتاً خارج از محدوده)
+└── transport_ir/
+    ├── hooks.py           (required_apps=["frappe","erpnext","ir_base"])
+    ├── modules.txt        ("Iran Transport")
+    └── iran_transport/
+        ├── __init__.py
+        ├── doctype/__init__.py
+        └── workspace/
+            └── iran_transport/
+                ├── __init__.py
+                └── iran_transport.json   (Workspace خالی اولیه)
+
+### 3.4 setup_phase4.sh → Master Data در transport_ir
+
+apps/transport_ir/transport_ir/iran_transport/
+├── validations/
+│   ├── __init__.py
+│   └── master_data.py     ← validate_master_mobile/driver/vehicle
+│         (import از ir_base.utils.validators — استفادهٔ مجدد فاز ۱)
+├── doctype/
+│   ├── border/                    (Border: نام مرز، استان، نوع مرز، کشور مقابل)
+│   ├── carrier/                   (Carrier: نام باربری، شبا، بانک)
+│   ├── customs_broker/            (Customs Broker)
+│   └── border_representative/     (Border Representative → Link به Border)
+├── fixtures/
+│   ├── custom_field.json  (Custom Field روی Driver/Vehicle/Item/Customer/Supplier)
+│   └── border.json        (۶ مرز واقعی ایران: بازرگان، مهران، شلمچه، دوغارون،
+│                            آستارا، پرویزخان)
+├── setup_workspace_phase4.py   (Force-apply Workspace از JSON — idempotent)
+└── verify_phase4.py             (Passed:15/Failed:0 انتظار می‌رود)
+
+hooks.py transport_ir += doc_events={"Driver":{"validate":validate_driver},
+                                       "Vehicle":{"validate":validate_vehicle}}
+
+### 3.5 setup_realign_gate.sh → Foundation Gate (بین فاز۴ و فاز۵)
+
+apps/transport_ir/
+├── DEVELOPMENT_RULES.md
+├── BACKLOG.md (به‌روزشده)
+└── transport_ir/
+    ├── hooks.py (پاکسازی + بازنویسی فیکسچرها: property_setter, custom_field,
+    │             border, translation + doc_events + app_include_js=[ensure_toolbar.js])
+    ├── fixtures/
+    │   ├── property_setter.json  (مخفی‌سازی فیلدهای ارثی ERPNext روی Vehicle:
+    │   │   make/model/last_odometer/fuel_type/fuel_uom/acquisition_date/
+    │   │   carbon_check_date + الزامی‌سازی license_plate + quick_entry=0)
+    │   ├── custom_field.json  (نسخهٔ گسترش‌یافته: +custom_is_smart_driver,
+    │   │   custom_license_number/expiry, custom_vehicle (Link به Vehicle),
+    │   │   custom_plate_number (fetch_from) روی Driver؛ custom_docs روی Vehicle)
+    │   ├── translation.json  (۱۸ ترجمهٔ فارسی نقش‌ها و اسامی DocType)
+    │   └── border.json
+    ├── validations/master_data.py  (نسخهٔ به‌روز با _get_existing_title برای
+    │                                 پیام خطای دقیق‌تر تکراری)
+    ├── setup_seeds.py   ← *** هستهٔ حیاتی این فاز ***
+    │     close_installed_app_gate() : REAL FIX — می‌نویسد
+    │       tabInstalled Application.is_setup_complete=1 برای frappe و erpnext
+    │       (این چیزی است که frappe.is_setup_complete() واقعاً می‌خواند —
+    │        نه System Settings.setup_complete!)
+    │     kill_wizard_and_onboarding()
+    │     ensure_warehouse_type("Transit")   (Transit باید قبل از Company بسازد)
+    │     ensure_company(name, abbr, currency)
+    │     set_company_defaults()  (۳ روش: API + SQL خام + Global Defaults)
+    │     ensure_fiscal_year("1405", start, end)  (+ لینک SQL به Company)
+    │     ensure_users()  ← ۱۲ کاربر عملیاتی واقعی از secrets.env:
+    │       ceo@irbco.local (مدیرعامل) → CEO
+    │       fin.mgr@irbco.local → Financial Manager
+    │       ehsan.nahalparvar@irbco.local (احسان نهال‌پرور) → Finance Supervisor
+    │       faezeh.heydari@irbco.local (فائزه حیدری) → Finance User
+    │       pouya.soleimani@irbco.local (پویا سلیمانی) → Legal Reviewer
+    │       atieh.alaei@irbco.local (عطیه اعلایی) → Treasury User
+    │       zahra.mirzaei@irbco.local (زهرا میرزایی) → Receivables User
+    │       najmeh.afrashtehpour@irbco.local (نجمه افراشته‌پور) → Transport Supervisor
+    │       amini@irbco.local (خانم امینی) → Transport User - Purchase
+    │       mohaddeseh.enayati@irbco.local (محدثه عنایتی) → Transport User - Sales
+    │       mohammadi@irbco.local (آقای محمدی) → Customs Officer
+    │       saeed.yousefi@irbco.local (سعید یوسفی) → Document Signer
+    │     restore_administrator()  (Administrator مقدس — بدون Employee لینک،
+    │       بدون block_modules، همیشه System Manager)
+    │     seed_all()  (ترتیب: kill_wizard → restore_admin → Transit →
+    │       Company → cleanup_wizard_residue → drop_stale_unique_index →
+    │       ensure_users → ensure_fiscal_year → workspace_label →
+    │       company_defaults → restore_admin → kill_wizard دوباره)
+    ├── public/js/ensure_toolbar.js  ← REAL FIX 2: باگ Frappe v15 که گاهی
+    │      Toolbar بالای صفحه ساخته نمی‌شود؛ این فایل با
+    │      frappe.ui.toolbar_obj = new frappe.ui.toolbar.Toolbar() آن را می‌سازد
+    └── verify_realign.py   (چک frappe.is_setup_complete()==True, ۱ شرکت،
+                              FY 1405 لینک‌شده، ۱۲ کاربر، Property Setterها،
+                              Custom Fieldها، allow_rename روی ۴ Master Data)
+
+secrets.env (خارج از Git — .gitignore) و secrets.env.template (نمونهٔ عمومی)
+
+### 3.6 setup_phase5.sh → Trade Case + Workflow اول
+
+apps/transport_ir/transport_ir/iran_transport/
+├── doctype/
+│   ├── trade_case/
+│   │   ├── trade_case.json   (naming_series=TC-.YYYY.-.#####؛ فیلدهای:
+│   │   │   case_title, case_type[خرید/فروش], workflow_state, posting_date,
+│   │   │   company, customer, supplier_factory, item, cargo_description,
+│   │   │   thickness, dimensions, qty, weight, planned_tonnage,
+│   │   │   purchase_amount, sales_amount, initial_costs, freight_cost,
+│   │   │   customs_cost, clearance_cost, destination, border,
+│   │   │   transport_type, delivery_type, signed_document (Attach),
+│   │   │   proforma_purchase, proforma_sales, legal_notes, treasury_notes,
+│   │   │   receivables_notes)
+│   │   ├── trade_case.py     (before_insert: auto-fill company/posting_date؛
+│   │   │   validate: Signature Guard — states_requiring_signature=
+│   │   │   [Pending Signature, Finance Supervisor, Receivables, Approved]
+│   │   │   بدون signed_document خطا می‌دهد؛
+│   │   │   on_update: Auto-Create Transport Case وقتی workflow_state=="Approved"
+│   │   │   + has_value_changed("workflow_state") — انتقال همهٔ فیلدها)
+│   │   └── test_trade_case.py
+│   └── transport_case/   (نسخهٔ اسکلتی اولیه — بعداً در فاز۶ کاملاً بازنویسی می‌شود)
+│       ├── transport_case.json  (فیلدهای پایه مشابه Trade Case + status
+│       │   [Draft/Pending Transport/Completed/Cancelled/Rejected] — این
+│       │   فیلد status بعداً در فاز۶ حذف و با workflow_state جایگزین می‌شود)
+│       └── transport_case.py    (اسکلت خالی)
+├── fixtures/
+│   ├── workflow_state.json  (۱۰ حالت: Draft, Legal Review, Treasury Review,
+│   │    Pending Signature, Finance Supervisor, Receivables, Approved,
+│   │    Rejected, Returned, On Hold)
+│   ├── workflow.json   ("Trade Case Workflow" — ۱۰ state × ۱۵ transition؛
+│   │    نکتهٔ فنی حیاتی: allow_edit/allowed فقط تک‌نقش در Frappe v15
+│   │    (Link field، نه Select چندمقداره) — چند ردیف برای چند نقش لازم است)
+│   └── client_script.json  ("Trade Case UX" — تنظیم خودکار company)
+└── verify_phase5.py  (تست Backend Guarantee, Signature Guard, Auto-Create با
+     انتقال کامل فیلد، Anti-Duplicate — انتظار Passed:24+/Failed:0)
+
+دیاگرام Workflow «Trade Case» (۱۰ حالت):
+
+  Draft ──ارسال به حقوقی──▶ Legal Review ──تایید حقوقی──▶ Treasury Review
+    │                            │                              │
+    │رد                      بازگشت به مالی                  تایید خزانه
+    ▼                            ▼                              ▼
+ Rejected                    Returned                  Pending Signature
+                                 │                              │
+                          بازگشت به پیش‌نویس                  امضا شد
+                                 ▼                              ▼
+                               Draft                  Finance Supervisor
+                                                                │
+                                                          تایید سرپرست
+                                                                ▼
+                                                          Receivables
+                                                                │
+                                                          تایید وصول
+                                                                ▼
+                                                            Approved
+                                                       (→ Auto-Create
+                                                        Transport Case)
+  Draft ──معلق──▶ On Hold ──از سرگیری──▶ Draft
+  (Treasury Review نیز می‌تواند معلق شود → On Hold با نقش Finance Supervisor)
+
+### 3.7 setup_phase6.sh → Transport Case عملیاتی کامل + Workflow دوم
+
+apps/transport_ir/transport_ir/iran_transport/
+├── doctype/
+│   ├── trade_case/trade_case.py   (بازنویسی: bridge insert=Draft سپس db_set
+│   │    به "Pending Supervisor Review" بعد از ایجاد خودکار — رفع
+│   │    WorkflowPermissionError که در تلاش اول رخ داده بود)
+│   ├── transport_case/  ← *** بازنویسی کامل JSON و Controller ***
+│   │   transport_case.json (فیلدهای غنی‌شده: priority[کم/متوسط/زیاد/فوری]
+│   │     پیش‌فرض متوسط، assigned_user، driver+driver_name/mobile/national_id
+│   │     (fetch_from)، vehicle+plate_number(fetch_from)، carrier،
+│   │     is_smart_driver، waybill_number/date/ref، weight_empty/full/
+│   │     net_weight، weighbridge_ref، needs_bijak/bijak_done/number/ref،
+│   │     clearance_status/done/customs_broker/border_representative/ref،
+│   │     delivery_receipt/date/done، payments(Table→Transport Payment)/
+│   │     payments_done، sent_to_finance/finance_approved/close_notes،
+│   │     chk_driver..chk_payments (۷ آیتم مخفی چک‌لیست)، other_cost+
+│   │     other_cost_description (mandatory_depends_on)، total_cost،
+│   │     estimated_profit (read_only، محاسبه‌شده))
+│   │   transport_case.py: _calculate_totals()
+│   │     total_cost = freight+customs+clearance+other+initial_costs+SUM(payments)
+│   │     estimated_profit = sales_amount - purchase_amount - total_cost
+│   │     _guard_stage_requirements(): زنجیرهٔ اعتبارسنجی مرحله‌ای اجباری
+│   │       (راننده الزامی از Driver Assigned به بعد، بارنامه از Waybill
+│   │        Issued، باسکول قبل از Waiting Bijak، بیجک/ترخیص/رسید تخلیه/
+│   │        پرداخت به ترتیب، و در Completed چک‌لیست کامل ۷موردی +
+│   │        finance_approved + actual_tonnage>0)
+│   │     _prevent_duplicate_payments(): کنترل تکرار per-row + کنترل
+│   │       متقاطع بر پایهٔ (driver,waybill_number,payment_type,amount)
+│   │     _auto_assign_by_case_type(): ارجاع خودکار به کارشناس نقش
+│   │       Transport User - Purchase/Sales (اولین کاربر واجد نقش)
+│   ├── transport_payment/     (Child Table: payment_type, amount, sheba,
+│   │    bank_name, payment_date, reference_no, paid_by, notes)
+│   ├── transport_waybill/     (Submittable! validate: تکراری‌نبودن
+│   │    waybill_number در سطح کنترلر (نه DB unique)؛ on_submit:
+│   │    _sync_to_case() → می‌نویسد روی Transport Case: driver, vehicle,
+│   │    waybill_number/date, freight_cost, actual_tonnage از tonnage)
+│   ├── transport_weighbridge/ (validate: net_weight=full-empty،
+│   │    net_tonnage=net_weight/1000؛ on_update وقتی approval_status==
+│   │    "تاییدشده" → sync به Case: weight_empty/full, net_weight,
+│   │    actual_tonnage=net_tonnage)
+│   ├── transport_bijak/       (validate: اگر needs_bijak=="بله" آنگاه
+│   │    bijak_attachment و declaration_attachment الزامی)
+│   └── transport_clearance/   (on_update: sync وضعیت ترخیص/هزینه‌ها به Case)
+├── fixtures/
+│   ├── workflow_state.json  (بازنویسی + ادغام: ۲۴ حالت جمع بین Trade و
+│   │    Transport؛ استایل‌بندی Success/Danger/Info/Warning)
+│   ├── workflow.json  ("Transport Case Workflow" — ۲۴ ردیف state (چند
+│   │    ردیف تک‌نقشی برای هر حالت) × ~۲۹ transition؛ حالات:
+│   │    Draft→Pending Supervisor Review→Pending Transport→Driver
+│   │    Assigned→Waybill Issued→In Transit→Waiting Weighbridge→
+│   │    Waiting Bijak→Waiting Clearance→Cleared→Delivered→Pending
+│   │    Payment→Pending Finance Close→Completed
+│   │    + شرط‌های doc.case_type=='خرید'/'فروش' برای انشعاب مسیر)
+│   └── client_script.json  ("Transport Case UX Phase6": توگل
+│        other_cost_description، محاسبهٔ زندهٔ net_weight/total_cost/profit،
+│        دکمه‌های «بارنامه/باسکول/بیجک/ترخیص جدید»)
+├── setup_workspace_phase6.py / verify_phase6.py (Passed چند-ده تست)
+
+دیاگرام Workflow «Transport Case» (خلاصهٔ مسیر اصلی خرید/فروش):
+
+ Draft → Pending Supervisor Review → Pending Transport
+    → Driver Assigned → Waybill Issued → In Transit
+    → Waiting Weighbridge → Waiting Bijak → Waiting Clearance
+    → Cleared → Delivered → Pending Payment
+    → Pending Finance Close → Completed
+ استثناها: On Hold (از Pending Supervisor Review) → از سرگیری → Draft
+           Cancelled (فقط از Draft)     Rejected  (وضعیت واقعاً غیرقابل‌دسترس
+                                                    بود؛ فقط از سرپرست حمل
+                                                    و بدون Transition ورودی
+                                                    واقعی به‌جز از Draft)
+
+نقاط ضعف مستندشده در همین فایل (که V2/V3 قرار بوده رفعشان کند):
+  BUG_F_WBT_FIELD_MISMATCH   → transport_case.py هنوز actual_tonnage را از
+      روی waybill tonnage در transport_waybill.py می‌نویسد (نه صرفاً از
+      باسکول)؛ اولویت باید: باسکول معتبر > actual دستی > هرگز از planned.
+  BUG_CHK_FINANCE_NAME       → فیلد واقعی finance_approved نام دارد،
+      نه chk_finance_approved (طبق درخواست V3 این نام درست تلقی می‌شود
+      اما باید به‌طور رسمی در گزارش/Timeline نمایان شود).
+  WF_REJECTED_REACHABLE      → Rejected عملاً به‌سختی از میانهٔ فرآیند
+      قابل‌دسترس است.
+  WF_CANCEL_FROM_MIDDLE      → لغو فقط از Draft مجاز است، نه از مراحل میانی.
+  WF_SALES_DELIVERY_PAYMENT  → مسیر Cleared→Delivered→Pending Payment
+      برای Transport User - Sales به‌صراحت مانند Purchase تعریف نشده
+      (تنها Transport User - Purchase transition دارد).
+
+### 3.8 setup_phase7.sh → UI/UX و ۶ Workspace نقش‌محور
+
+apps/transport_ir/transport_ir/
+├── public/
+│   ├── icons/transport_sprite.svg      (۶ آیکون SVG اختصاصی)
+│   ├── js/ensure_icons.js              (تزریق Sprite)
+│   ├── js/ceo_dashboard_kpi.js         (پنل KPI با تشخیص صحیح
+│   │    frappe.get_route()==["Workspaces","CEO Dashboard"])
+│   └── css/phase7_transport_ui.css     (نوار پیشرفت فرم + استایل KPI)
+├── iran_transport/
+│   ├── api/ceo_kpi.py   (get_ceo_kpi(): شمارش بر اساس workflow_state،
+│   │   جمع تناژ/سود/کرایه/گمرک/ترخیص Completed، گروه‌بندی by_border/
+│   │   by_factory/by_customer — دسترسی محدود به CEO/System Manager/
+│   │   Financial Manager/Finance Supervisor/Transport Supervisor)
+│   ├── setup_ui_phase7.py  (Number Card×11 + Dashboard Chart×3 +
+│   │   Kanban Board «Transport Case Workflow Board» (بدون Draft/Hold/
+│   │   Cancelled/Rejected) + ۶ Workspace: CEO Dashboard, Finance,
+│   │   Iran Transport, Transport Purchase, Transport Sales, Customs)
+│   └── verify_phase7.py
+└── patches/v1_0/phase7_ui.py  (post_model_sync patch)
+
+نقشهٔ ۶ Workspace فاز ۷ (نقش‌محور):
+  CEO Dashboard        → نقش: CEO (+System Manager)      icon: tir-dashboard
+  Finance              → Financial Manager, Finance Supervisor,
+                          Finance User, Legal Reviewer, Treasury User,
+                          Receivables User, Document Signer
+  Iran Transport       → Transport Supervisor             icon: tir-truck
+  Transport Purchase   → Transport User - Purchase        icon: tir-buy
+  Transport Sales      → Transport User - Sales           icon: tir-sell
+  Customs              → Customs Officer                  icon: tir-customs
+
+### 3.9 setup_phase84.sh (فاز ۸ نهایی) → گزارش، چاپ، اکسل (بزرگترین فایل)
+
+apps/transport_ir/transport_ir/iran_transport/
+├── phase8/events.py    (sync_trade_invoice_fields: انتشار شماره/تاریخ
+│    فاکتور خرید و فروش از Trade Case به همهٔ Transport Case‌های فعال آن)
+├── utils/jinja_helpers.py  (fa_digits, normalize_persian [نرمال‌سازی قوی
+│    فارسی/عربی، ی/ک عربی، اعداد، نویسه‌های صفرعرض]، fa_money, fa_date,
+│    latin_jalali_date, fa_datetime — «تک منبع» تبدیل تاریخ همچنان
+│    from ir_jalali.utils.jalali import format_jalali)
+├── report/    (۹ گزارش Script Report، هرکدام .py + .js جدا):
+│   ├── trade_transport_1405/   ← گزارش ۲۶ستونی معروف؛ دو نیمهٔ کاملاً
+│   │      مستقل خرید/فروش (case_type) با running-total جداگانه برای هر
+│   │      سمت (cumulative_sales_shipped/surplus/remaining و همتای خرید)
+│   │      shipment_totals از SUM(Transport Case.actual_tonnage یا
+│   │      net_weight/1000) به‌ازای هر Trade Case
+│   ├── freight_report/         (تفصیلی + گروه‌بندی روزانه/ماهانه/سالانه
+│   │      + تفکیک بر اساس راننده/باربری/مشتری/کارخانه)
+│   ├── customs_report/         (تفکیک مرز/اظهار/ترخیص‌کار/راننده)
+│   ├── tonnage_report/         (planned vs actual + انحراف)
+│   ├── profit_report/          (بر مبنای LEFT JOIN با SUM هزینهٔ عملیاتی
+│   │      واقعی از Transport Case وابسته، وگرنه fallback به فیلدهای
+│   │      Trade Case خودش)
+│   ├── stalled_cases_report/   (مدل ۲۴/۴۸ ساعته: عادی/تأخیر/بحرانی)
+│   ├── payments_report/        (شبای ماسک‌شده: IR93****0872)
+│   ├── daily_summary_report/   (روزانه/ماهانه/سالانه با تعداد تکمیل‌شده)
+│   └── packing_report/         (شماره پیش‌فاکتور خرید/فروش fallback از
+│          Trade Case وقتی روی Transport Case خالی است)
+├── print_format/  (۴ Print Format جدید RTL/Jinja، DocType واقعی:
+│   ├── trade_case_proforma          → Trade Case
+│   ├── transport_packing_list       → Transport Case
+│   ├── transport_waybill_print      → Transport Waybill
+│   └── transport_weighbridge_print  → Transport Weighbridge
+│   (حذف عمدی نسخه‌های رد‌شدهٔ قبلی: Waybill Print, Weighbridge Print)
+├── api/
+│   ├── report_excel.py    (Excel استاندارد: download_1405, export_packing,
+│   │   export_carrier_statement, export_customs_statement, export_proforma,
+│   │   download_proforma_template, import_proforma_excel — Import
+│   │   ترنزکشنال با اعتبارسنجی حجم/سطر/نوع/دسترسی)
+│   └── report_excel_custom.py  ← *** لایهٔ اختصاصی Golden-Rules ***
+│      TEMPLATE_REGISTRY با ۵ قالب دقیق کارفرما:
+│        financial (template_01، شیت «گزارش 1405»، ۲۶ ستون A..Z،
+│           ستون‌های مخفی I,J,K,M,U,V,W,Y، Merge محافظت‌شده F1:G1)
+│        freight   (template_02، تایپوهای اصلی کارفرما عیناً حفظ:
+│           «هزنیه تخلیه»، «هزنیه بارگیری»؛ فرمول‌های محافظت‌شده
+│           G=F*E ، J=I+G ، L=J-K)
+│        packing   (template_03، LTR باقی می‌ماند! ستون‌های Branch=qty
+│           نه مرز، Delivery B.=مرز تحویل نه فاکتور فروش)
+│        purchase  (template_04، ۴ شیت اجباری: فروشنده/معرفی کالا/
+│           پیش فاکتور خرید/صورت بارگیری؛ کلید SUMIFS مشترک ستون
+│           C پیش‌فاکتور خرید ↔ ستون D صورت بارگیری)
+│        dispatch  (template_05، Merge محافظت‌شده B2:L2، SUM ستون E=E10)
+│      قوانین طلایی رعایت‌شده در کد: P0 قرارداد واقعی اکسل، P1 فقط
+│      فیلد واقعی Meta، متن کارفرما هرگز اصلاح‌ نمی‌شود، alias فقط در
+│      لایهٔ تطبیق، قفل مختصات قبل از fuzzy، ابهام=UNRESOLVED،
+│      Import=Preview→Validate→Resolve→Commit با Rollback کامل
+├── setup_phase8.py  (پاکسازی نام‌های رد‌شده، Backfill invoice fields،
+│    Sync ۶ Workspace با دو کارت Report: «استاندارد» و «اختصاصی»)
+└── verify_phase8.py  (تست ریاضی مستقل بودن ستون‌های خرید/فروش گزارش
+     ۱۴۰۵ با synthetic rows — sales row نباید هیچ مقداری در سمت خرید
+     بگذارد و برعکس)
+
+### 3.10 setup_phase9.sh → apps/ir_gateway/ (SMS/SLA/Alert)
+
+apps/ir_gateway/ir_gateway/
+├── hooks.py  (scheduler_events: cron "*/15 * * * *" → check_all_sla،
+│    daily → send_daily_ceo_report؛ doc_events روی Transport Case/
+│    Waybill/Weighbridge/Bijak/Clearance)
+├── ir_gateway/
+│   ├── sms/
+│   │   ├── base_adapter.py       (BaseSMSAdapter ABC + register_adapter
+│   │   │    پروکسی — بدون circular import)
+│   │   ├── adapter_registry.py   (کشف خودکار پلاگین از پوشهٔ adapters/)
+│   │   ├── adapters/
+│   │   │   ├── generic_http.py   (POST عمومی برای اکثر پنل‌های ایرانی)
+│   │   │   └── kavenegar.py      (آداپتور اختصاصی کاوه‌نگار)
+│   │   └── sms_service.py  ← *** تنها نقطهٔ ورود ارسال پیامک ***
+│   │        send_sms(): تست‌مود، duplicate_guard، retry (max_retry+delay)،
+│   │        SMS Alert Log، به‌روزرسانی notification_history روی سند مرجع
+│   ├── sla/
+│   │   ├── sla_monitor.py   (check_all_sla؛ evaluate(): normal/warning/
+│   │   │    breached/critical بر مبنای warning_threshold_percent؛
+│   │   │    از frappe.utils.scheduler.is_scheduler_inactive استفاده
+│   │   │    می‌کند — is_scheduler_active در v15 وجود ندارد)
+│   │   └── escalation_engine.py  (get_recipients: راننده برای
+│   │        driver_assigned، assigned_user برای SLA، نقش‌ها/کاربران
+│   │        از Alert Escalation Rule — Administrator/Guest صراحتاً حذف)
+│   ├── alerts/
+│   │   ├── template_renderer.py  ({{var}} + build_case_context کامل)
+│   │   ├── duplicate_guard.py    (پنجرهٔ ۱ساعته؛ sla_breached/critical
+│   │   │    از این قاعده معاف‌اند — باید بتوانند تکرار شوند)
+│   │   ├── alert_service.py      (نگاشت state→event: driver_assigned,
+│   │   │    waybill_issued, weighbridge_recorded, bijak_required/
+│   │   │    completed, clearance_started/completed, delivery_completed,
+│   │   │    case_completed)
+│   │   └── daily_report.py       (گزارش روزانه CEO؛ متریک‌ها: تناژ
+│   │        تکمیل‌شده، معطلی>۲۴ساعت، top_destination/top_factory)
+│   ├── channels/  (Stub های آینده: telegram/email/base_channel — عمداً
+│   │    پیاده‌سازی نشده، فقط قرارداد انتزاعی)
+│   ├── doctype/  (۸ DocType: SMS Gateway Settings [Single]،
+│   │    SMS Template، SMS Alert Log، SLA Stage Config،
+│   │    Alert Escalation Rule، Notification History [Table]،
+│   │    Alert Escalation Role/User [Table MultiSelect children])
+│   ├── api/sms_api.py + alert_api.py  (whitelisted)
+│   └── verify_phase9.py
+└── translations/fa.csv
+
+نکتهٔ معماری حیاتی (پیش‌زمینهٔ نیاز به V3): این فایل فقط یک موتور SLA
+دارد (check_all_sla هر ۱۵ دقیقه) — سند نیازمندی‌های V3 اشاره می‌کند که در
+نسخهٔ زندهٔ سایت دو موتور موازی (این‌یکی + phase9_5_notify.run_sla_monitor2)
+فعال بوده که خارج از این فایل (در مید-فازها) اضافه شده است.
+
+### 3.11 setup_phase10.sh → apps/ir_integration/ (هاب مالی، Dry-Run)
+
+apps/ir_integration/ir_integration/
+├── capabilities/base.py  (Authentication/Customer/Item/Invoice/Payment/
+│    Reconciliation Capability — قرارداد انتزاعی چندگانه)
+├── adapters/
+│   ├── base_adapter.py + adapter_registry.py  (کشف خودکار)
+│   └── sepidar/
+│       ├── sepidar_mapping.py   (DEFAULT_ACCOUNT_MAP، DEFAULT_DOCTYPE_MAP)
+│       ├── sepidar_auth.py      (NotImplementedError — موکول به فاز ۱۰B)
+│       └── sepidar_adapter.py   (capabilities=[authentication,customer,
+│            item,invoice,payment]؛ dry_run() همیشه preview برمی‌گرداند؛
+│            test_connection فقط در dry_run موفق است)
+├── services/
+│   ├── integration_service.py  ← push_to_external(): بررسی
+│   │    is_integration_enabled → get_configured_adapter → پیشگیری از
+│   │    duplicate (پنجرهٔ ۶۰دقیقه‌ای بر پایهٔ Integration Log) →
+│   │    dry_run یا _dispatch_real_export → Integration Log
+│   ├── mapping_service.py
+│   └── sync_service.py  (سه تابع sync_* فعلاً not_implemented)
+├── doctype/ (۶ عدد: External Integration Settings [Single، پیش‌فرض
+│    integration_enabled=0، hide_from_ui=1]، External System، Integration
+│    Mapping، Integration Log، Integration Sync Status [Table]،
+│    Reconciliation Rule)
+├── page/financial_dashboard/  (Page ساده با جدول سیستم‌ها/لاگ اخیر)
+├── workspace/ir_integration/ (+ finance_integration برای اتصال به
+│    Workspace مالی موجود از طریق setup_workspace.py)
+├── setup/
+│   ├── setup_workspace.py       (افزودن کارت لینک به Workspace Finance)
+│   └── workspace_normalize.py   (تضمین name/label/title انگلیسی — چون
+│        Frappe v15 مسیر را از روی title می‌سازد اما با name می‌یابد؛
+│        عنوان فارسی → 404)
+├── fixtures/  (external_system.json="Sepidar"، integration_mapping×5،
+│    custom_field.json (external_system/id/sync_status/last_sync/mapping
+│    روی Transport Case, Sales/Purchase Invoice, Payment Entry, Customer,
+│    Supplier))
+└── verify_phase10.py
+
+قید بنیادین این فاز: dry_run=1 پیش‌فرض همه‌جا؛ push واقعی SMS/دادهٔ
+حسابداری به بیرون هرگز به‌طور پیش‌فرض رخ نمی‌دهد.
+
+### 3.12 setup_phase10.5.sh (متن داخلی: «Phase 11») → چندبارگیری Additive
+
+apps/transport_ir/transport_ir/
+├── iran_transport/doctype/trade_case/trade_case.json  (+= فیلدهای
+│    Additive: shipped_tonnage, reserved_tonnage, remaining_tonnage,
+│    remaining_capacity, loading_completed, allow_overloading
+│    (permlevel=1، فقط System Manager/Financial Manager))
+├── iran_transport/phase11_multishipment/
+│   ├── service.py  ← get_active_transport_rows (SQL مستقیم روی
+│   │    tabTransport Case با trade_case=X و state not in
+│   │    [Cancelled,Rejected])
+│   │    compute_metrics(): shipped=SUM(actual_tonnage یا net_weight/1000)
+│   │    reserved=SUM(planned_tonnage همهٔ ردیف‌های فعال)
+│   │    remaining_tonnage=max(0,planned-shipped)
+│   │    remaining_capacity=max(0,planned-reserved)
+│   │    validate_transport_overloading(): مسدودسازی مجموع
+│   │    planned_tonnage رزروشده اگر > تناژ Trade Case (مگر
+│   │    allow_overloading=1)
+│   │    validate_allow_overloading(): فقط System Manager/Financial
+│   │    Manager می‌توانند این پرچم را فعال کنند
+│   └── install_client_script.py  (پنل بصری تناژ + دکمهٔ «حمل جدید»
+│        روی فرم Trade Case وقتی Approved و ظرفیت باقی‌مانده>0)
+├── patches/v1_0/phase11_multishipment_backfill.py
+└── patches.txt += [post_model_sync] transport_ir.patches.v1_0.
+     phase11_multishipment_backfill
+
+معماری کلیدی این فاز: به‌جای Overwrite کردن hooks.py، از الگوی
+«merge» با globals().get("doc_events",{}) استفاده می‌شود تا Handlerهای
+فازهای قبلی حذف نشوند — این دقیقاً همان الگویی است که سند نیازمندی V3
+به‌عنوان «جلوگیری از اجرای موازی Hookهای قدیمی» می‌خواهد.
+
+تفکیک دو مفهوم که در این فایل معرفی و توسط V3 باید حفظ شود:
+  reserved_tonnage = SUM(planned_tonnage) محموله‌های فعال (فقط رزرو ظرفیت)
+  shipped_tonnage  = فقط از actual_tonnage/net_weight واقعی (هرگز از planned)
+
+### 3.13 transport_erp.sh (متن داخلی: «setup_phase12_v2.sh») → ۵ داشبورد فرماندهی
+
+apps/transport_ir/transport_ir/iran_transport/
+├── phase12_workspaces/
+│   ├── config.py  ← *** تک منبع حقیقت پیکربندی داشبورد ***
+│   │    TRANSPORT_FLOW (۱۴ مرحله با SLA ساعتی هرکدام)
+│   │    TRADE_FLOW (۷ مرحله)
+│   │    CLOSE_CHECKLIST (۱۰ آیتم: chk_purchase, chk_sales, chk_driver,
+│   │        chk_waybill, chk_weighbridge, chk_bijak, chk_clearance,
+│   │        chk_delivery, chk_payments, finance_approved)
+│   │        *** نکته: در فاز۶ فقط ۷ چک باکس واقعی روی DocType بود؛
+│   │        این فایل ۱۰ آیتم را در UI «فرض» می‌کند — یعنی
+│   │        chk_purchase/chk_sales هنوز به‌عنوان فیلد واقعی DocType
+│   │        در فاز۶ ایجاد نشده بودند (نیازمندی V3: باید ساخته و در
+│   │        گزارش/Timeline نشان داده شوند) ***
+│   │    ROLE_LABELS (نگاشت فارسی همهٔ ۱۲+۱ نقش)
+│   │    DASHBOARDS: transport_ops, ceo, finance, customs, commercial
+│   │    WORKSPACES: Transport Control Tower, CEO Command Center,
+│   │        Finance And Treasury, Customs And Gateway, Commercial Desk
+│   │    NUMBER_CARDS (۱۲ کارت) + CHARTS (۴ نمودار Group-By)
+│   ├── api/
+│   │   ├── dashboard.py  (get_dashboard(key), get_case_timeline،
+│   │   │    smart_search («جستجوی هوشمند» بین Transport Case/Trade Case/
+│   │   │    Driver/Vehicle/Customer/Transport Waybill)، send_reminder
+│   │   │    (ToDo + Notification Log + Comment))
+│   │   └── kpi.py    (get_transport_kpi/trade_kpi/finance_kpi/customs_kpi)
+│   └── workspaces.py  (ensure_number_cards/ensure_charts/ensure_workspaces
+│        idempotent — با _safe_color fallback برای رنگ‌های نامعتبر)
+├── page/  (۵ صفحهٔ اختصاصی، هرکدام .json + .js:
+│    transport_ops_dashboard      → route: transport-ops-dashboard
+│    ceo_command_center           → route: ceo-command-center
+│    finance_control_center       → route: finance-control-center
+│    customs_gateway_desk         → route: customs-gateway-desk
+│    commercial_desk_center       → route: commercial-desk-center)
+├── public/css/phase12_dashboard.css  (طراحی کامل RTL enterprise با
+│    KPI/Stage-rail/Table/Focus-Timeline/Kanban/Map(SVG ایران)/
+│    Performance/Alerts)
+├── public/js/
+│   ├── phase12_dashboard.js  (موتور رندر مشترک بین هر ۵ داشبورد؛
+│   │    Polling هر ۱۲۰ثانیه، جستجوی زنده debounce=280ms)
+│   └── phase12_ux.js  (نوار پیشرفت مرحله‌ای + دکمه یادآوری روی فرم
+│        Transport Case/Trade Case)
+└── translations/fa.csv (+= بلاک PHASE12 اضافه‌شونده و idempotent —
+     name/label/title انگلیسی برای پایداری Route؛ ترجمهٔ فارسی فقط
+     نمایشی)
+
+نکتهٔ حیاتی امنیت مسیر: نسخهٔ v1 قبلی (setup_phase12.sh) نام/عنوان
+Workspace/Page را فارسی گذاشته بود که باعث خطای «صفحه یافت نشد»
+می‌شد (Frappe v15 مسیر Route را از روی title می‌سازد ولی جست‌وجو را با
+name انجام می‌دهد). transport_erp.sh این مشکل را با «name/label/title
+انگلیسی + ترجمه از fa.csv» حل کرده — این دقیقاً همان الگویی است که
+setup_phase10.sh (workspace_normalize.py) هم برای ir_integration به کار
+برده است؛ یعنی یک الگوی معماری تکرارشونده در کل پروژه.
+
+--------------------------------------------------------------------------------
+۴) نقشهٔ کامل نقش‌ها (Roles) و دسترسی‌ها (Permissions)
+--------------------------------------------------------------------------------
+
+۱۲ نقش سفارشی (ساخته‌شده در فاز۳ به‌عنوان fixture در ir_base):
+
+  نقش (انگلیسی)                  | برچسب فارسی           | حوزهٔ اصلی
+  --------------------------------|------------------------|----------------------
+  CEO                             | مدیرعامل               | تصمیم کلان + امضا
+  Financial Manager               | مدیر مالی              | نظارت مالی کلان
+  Finance Supervisor              | سرپرست مالی            | تایید نهایی/بستن پرونده
+  Finance User                    | کارشناس مالی           | ثبت اولیهٔ Trade Case
+  Legal Reviewer                  | بررسی حقوقی            | تایید حقوقی Trade Case
+  Treasury User                   | خزانه                  | تایید خزانه/پرداخت
+  Receivables User                | وصول مطالبات           | تایید نهایی Trade Case
+  Transport Supervisor            | سرپرست حمل             | مدیریت کل عملیات حمل
+  Transport User - Purchase       | کارشناس حمل خرید       | مسیر خرید Transport Case
+  Transport User - Sales          | کارشناس حمل فروش       | مسیر فروش Transport Case
+  Customs Officer                 | کارشناس گمرک           | باسکول/بیجک/ترخیص
+  Document Signer                 | امضاکننده سند           | امضای سند Trade Case
+
+نقش سیستمی: System Manager — همیشه دسترسی کامل دارد و در همهٔ اسناد
+Permission لیست می‌شود؛ Administrator طبق طراحی «مقدس» است (بدون Employee
+لینک، بدون block_modules) اما این ۱۲ نقش کاربردی صراحتاً برایش تخصیص
+داده نمی‌شود مگر به‌صورت پیش‌فرض System Manager.
+
+جدول Permission بر اساس DocType (برگرفته از فایل‌های JSON مطالعه‌شده):
+
+  DocType             | خواندن/نوشتن اصلی                          | فقط خواندن
+  --------------------|----------------------------------------------|------------------
+  Trade Case          | Finance User (rw ایجاد)، Legal Reviewer (rw)، | CEO
+                       | Treasury User(rw)، Document Signer(rw)،       |
+                       | Finance Supervisor(rw)، Receivables User(rw)، |
+                       | Transport Supervisor(rw)، Transport User-     |
+                       | Purchase/Sales(rw)، Financial Manager(rw)     |
+  Transport Case      | Transport Supervisor(crud+report+export)،     | Customs Officer(rw)
+                       | Transport User-Purchase/Sales(rw+report)      | Finance Supervisor/
+                       |                                                | Financial Manager/
+                       |                                                | Finance User(rw)/ CEO(r)
+  Transport Waybill   | System Manager(full)، Transport Supervisor    | Customs Officer،
+                       | (submit)، Transport User-Purchase(rw)،        | Finance Supervisor،
+                       | Transport User-Sales(rw+submit)                | Financial Manager، CEO
+  Border/Carrier/     | System Manager، Transport Supervisor (rw)     | Transport User-Purchase/
+  CustomsBroker/      |                                                | Sales، Customs Officer،
+  BorderRepresentative|                                                | Financial Manager، CEO
+                       | + فاز ۶: finance_roles (Finance User, Finance |
+                       |   Supervisor, Financial Manager, Legal        |
+                       |   Reviewer, Treasury User, Receivables User)  |
+                       |   نیز read+report دریافت می‌کنند (realign_gate)|
+  SMS Gateway Settings | System Manager (full)                        | CEO، Financial Manager،
+                       |                                                | Transport Supervisor
+  External Integration| System Manager (full)                        | Financial Manager، CEO
+  Settings             |                                                |
+
+قانون طلایی مشترک همهٔ فازها (تکرارشونده در کامنت‌های کد):
+  «Administrator و Guest هرگز نباید در گردشکار یا گیرندگان هشدار قرار
+   بگیرند» — دقیقاً منطبق با محدودیت درخواستی V3.
+
+--------------------------------------------------------------------------------
+۵) ارتباط داده‌ای بین DocTypeهای اصلی (نمودار جریان دادهٔ سند)
+--------------------------------------------------------------------------------
+
+  Trade Case (بازرگانی)
+      │  workflow_state == "Approved"  &  has_value_changed
+      │  on_update() در trade_case.py
+      ▼
+  Transport Case (حمل) ──[trade_case: Link غیریکتا — یک Trade Case
+      │                    می‌تواند چند Transport Case داشته باشد؛
+      │                    این «چندبارگیری» پایهٔ فاز ۱۰.۵/۱۱ است]
+      │
+      ├──▶ Transport Waybill  (on_submit → sync به Transport Case:
+      │        driver, vehicle, plate_number, carrier, waybill_number/
+      │        date, freight_cost, actual_tonnage)
+      │
+      ├──▶ Transport Weighbridge  (on_update وقتی تاییدشده → sync:
+      │        weight_empty/full, net_weight, actual_tonnage)
+      │
+      ├──▶ Transport Bijak  (on_update → sync: needs_bijak, bijak_number,
+      │        declaration_number, bijak_done)
+      │
+      ├──▶ Transport Clearance  (on_update → sync: clearance_status,
+      │        customs_broker, border_representative, customs_cost,
+      │        clearance_cost, clearance_done)
+      │
+      └──▶ Transport Payment (Child Table داخل Transport Case —
+               چندین ردیف پرداخت با payment_type: پیش‌کرایه/کرایه/
+               گمرک/ترخیص/سایر)
+
+  گزارش‌ها (فاز۸) از Transport Case + Trade Case می‌خوانند:
+      trade_transport_1405  ← Trade Case (تناژ) + SUM(Transport Case.
+                                actual_tonnage) گروه‌بندی‌شده با
+                                trade_case
+      profit_report          ← Trade Case + LEFT JOIN SUM هزینهٔ عملیاتی
+                                Transport Case وابسته
+      freight/customs/tonnage/payments/packing_report ← مستقیماً از
+                                Transport Case (و Transport Payment)
+
+  فاز ۹ (ir_gateway) روی رویدادهای workflow_state این دو DocType سوار
+  می‌شود (doc_events) و بدون تغییر مستقیم داده، فقط پیامک/هشدار
+  می‌فرستد.
+
+  فاز ۱۰ (ir_integration) این دو DocType (+ Sales/Purchase Invoice،
+  Payment Entry، Customer، Supplier) را با Custom Field
+  external_system/external_id/external_sync_status/last_external_sync
+  غنی می‌کند و صرفاً در Dry-Run آن‌ها را به Sepidar «پیش‌نمایش» می‌کند.
+
+  فاز ۱۲ (transport_erp.sh) فقط Read-Only از این دو DocType (+ Driver،
+  Vehicle، Customer، Border) برای ساخت داشبورد/KPI/Kanban/نقشه استفاده
+  می‌کند — هیچ نوشتنی در این فایل روی این DocTypeها انجام نمی‌شود
+  به‌جز send_reminder() که ToDo/Notification Log/Comment می‌سازد (نه
+  فیلدی از خود سند).
+
+--------------------------------------------------------------------------------
+۶) دیاگرام درخت کامل اپ transport_ir (تجمیع همهٔ فازهای مطالعه‌شده)
+--------------------------------------------------------------------------------
+
+apps/transport_ir/
+├── BACKLOG.md
+├── DEVELOPMENT_RULES.md
+├── secrets.env (untracked) / secrets.env.template
+└── transport_ir/
+    ├── hooks.py   (لایه‌های additive بین‌مارکرهای:
+    │    PHASE4_HOOKS / PHASE5_HOOKS / PHASE6_HOOKS / PHASE7_HOOKS /
+    │    PHASE8_HOOKS / REALIGN_GATE_HOOKS / PHASE11_MULTI_SHIPMENT_HOOKS /
+    │    PHASE12_WORKSPACES_HOOKS)
+    ├── modules.txt  ("Iran Transport")
+    ├── patches.txt  ([post_model_sync] phase7_ui، phase8، phase11 backfill)
+    ├── fixtures/  (custom_field, property_setter, border, translation,
+    │    workflow_state, workflow, client_script — همه با ابزار
+    │    load()/dump() پایتون در فاز۶ ادغام idempotent می‌شوند)
+    ├── translations/fa.csv
+    └── iran_transport/
+        ├── validations/master_data.py
+        ├── phase8/events.py
+        ├── phase11_multishipment/{service.py, install_client_script.py}
+        ├── phase12_workspaces/{config.py, workspaces.py, setup.py,
+        │    api/{dashboard.py, kpi.py}}
+        ├── utils/jinja_helpers.py
+        ├── api/{ceo_kpi.py, report_excel.py, report_excel_custom.py}
+        ├── doctype/
+        │   ├── border/, carrier/, customs_broker/, border_representative/
+        │   ├── trade_case/  (+ trade_case.js, trade_case_list.js)
+        │   ├── transport_case/  (+ transport_case_list.js از فاز۸)
+        │   ├── transport_payment/ (child)
+        │   ├── transport_waybill/ (submittable)
+        │   ├── transport_weighbridge/
+        │   ├── transport_bijak/
+        │   └── transport_clearance/
+        ├── report/ (۹ گزارش)
+        ├── print_format/ (۴ فرمت چاپ)
+        ├── page/ (۵ صفحهٔ داشبورد فاز۱۲)
+        ├── workspace/ (iran_transport, ceo_dashboard, finance,
+        │    transport_purchase, transport_sales, customs — از فاز۷)
+        ├── public/{css,js,icons}/
+        └── setup_workspace_phase4.py / setup_workspace_phase6.py /
+            setup_ui_phase7.py / setup_phase8.py / verify_phase{4,5,6,7,8}.py
+
+--------------------------------------------------------------------------------
+۷) وابستگی‌های خارجی (Python/JS) استخراج‌شده از این فایل‌ها
+--------------------------------------------------------------------------------
+  - openpyxl>=3.1,<4    (فاز۸: خواندن/نوشتن Excel، اضافه به requirements.txt
+                          و نصب با bench pip)
+  - requests>=2.28      (فاز۹ ir_gateway و فاز۱۰ ir_integration: HTTP
+                          adapters برای SMS/Sepidar)
+  - jQuery/$ (توکار Frappe)  برای همهٔ فایل‌های JS سفارشی
+  - Vazirmatn/IRANSans/IRANYekan  فونت‌های فارسی مورد ارجاع در CSS
+    (بدون تعبیهٔ خود فایل فونت در این اسکریپت‌ها)
+  - هیچ کتابخانهٔ نقشهٔ واقعی (Leaflet/Mapbox) استفاده نشده — نقشهٔ ایران
+    در فاز۱۲ صرفاً یک SVG Polygon دستی با مختصات درصدی است.
+
+--------------------------------------------------------------------------------
+۸) نقاط حساس و مشکلات بالقوهٔ شناسایی‌شده (صرفاً بر مبنای همین ۱۳ فایل)
+--------------------------------------------------------------------------------
+  الف) دو تعریف تناژ به‌طور موازی: فاز۶ (transport_case.py: fallback
+       actual_tonnage=net_weight/1000 در _calculate_totals) در برابر
+       فاز۱۰.۵ (phase11_multishipment/service.py: منطق مشابه اما مستقل)
+       — دو محل محاسبهٔ یک مقدار، ریسک ناهم‌خوانی آینده.
+  ب) فیلد status در transport_case.json فاز۵ (Draft/Pending Transport/
+     Completed/Cancelled/Rejected) در فاز۶ کاملاً با workflow_state
+     جایگزین می‌شود؛ verify_phase6.py صریحاً چک "NO status field" دارد —
+     یعنی نویسندگان کد از این انحراف آگاه بوده و آن را بسته‌اند.
+  ج) allow_edit/allowed در Workflow Frappe v15 فقط تک‌نقشی (Link) است؛
+     در صورت فراموشی این قاعده در توسعه‌های بعدی، چند نقش در یک رشته با
+     \n باعث خطای اعتبارسنجی Frappe می‌شود (این نکته دقیقاً در فاز۵ و ۶
+     به‌صراحت به‌عنوان "CRITICAL FIX" مستند شده است).
+  د) Persian Workspace name/title چندین بار (فاز۱۰ ir_integration و
+     فاز۱۲ transport_erp) باعث خطای ۴۰۴ در Route شده و هربار جداگانه
+     "fix" شده — یعنی این یک الگوی تکرارشوندهٔ خطا در کل تاریخ توسعهٔ
+     پروژه بوده، نه یک اتفاق مجزا.
+  ه) فاز ۹ (ir_gateway) تنها یک موتور SLA دارد (check_all_sla هر ۱۵
+     دقیقه)؛ داده‌های نیازمندی V3 اشاره دارند در نسخهٔ فعلی سایت یک
+     موتور دوم (phase9_5_notify) به‌صورت جداگانه (خارج از این فایل)
+     اضافه شده که باید طبق قوانین V3 غیرفعال و به یک موتور واحد
+     تقلیل یابد.
+  و) بارنامه (transport_waybill.py:_sync_to_case) می‌تواند
+     case.actual_tonnage را از روی tonnage خودش بازنویسی کند؛ این دقیقاً
+     نقطه‌ای است که سند نیازمندی V3 آن را BUG_F_WBT_FIELD_MISMATCH
+     می‌نامد و می‌خواهد با یک فیلد جدا (waybill_tonnage) و اولویت
+     «باسکول > actual دستی > هرگز planned» جایگزین شود.
+
+================================================================================
+پایان مستند فنی — تمام محتوا مستقیماً از خط‌به‌خط ۱۳ فایل درخواستی استخراج شده
+است و هیچ فرض یا حدسی فراتر از متن واقعی کد اضافه نشده است.
+================================================================================

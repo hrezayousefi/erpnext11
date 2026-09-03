@@ -1,0 +1,149 @@
+====================================================================
+راهنمای فنی فایل: setup_phase10.sh  ("Phase 10A Financial Integration
+Hub — CORRECTED")
+مسیر: erpnext/setup_phase10.sh   (1843 خط - مطالعه کامل شد)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+اپ کاملاً مستقل `ir_integration`: یک "هاب یکپارچه‌سازی مالی" با معماری
+Capability-Based Adapter برای اتصال احتمالی به سیستم‌های حسابداری
+بیرونی (نمونه‌ی پیاده‌سازی‌شده: Sepidar/حسابداری همکاران سیستم) که در
+این فاز (10A) فقط حالت Dry-Run/Preview کار می‌کند، هیچ ارسال واقعی
+انجام نمی‌شود.
+
+2) معماری Capability
+--------------------------------------------------------------------
+capabilities/base.py: کلاس‌های انتزاعی جدا برای هر قابلیت:
+  AuthenticationCapability (authenticate, get_auth_mode)
+  CustomerCapability (get_customers, push_customer)
+  ItemCapability (get_items, push_item)
+  InvoiceCapability (push_sales_invoice, push_purchase_invoice,
+    get_invoice_status)
+  PaymentCapability (push_payment, get_payment_status)
+  ReconciliationCapability (get_balances, reconcile)
+این تفکیک باعث می‌شود بتوان یک آداپتور را که فقط بخشی از قابلیت‌ها را
+پیاده کرده تشخیص داد (adapter.supports("reconciliation") -> False برای
+Sepidar در این فاز).
+
+3) adapters/base_adapter.py + adapter_registry.py
+--------------------------------------------------------------------
+BaseExternalAdapter(ABC): adapter_id/adapter_name/system_type/
+  capabilities؛ متد supports(capability_name)؛ متدهای انتزاعی
+  get_config_fields/get_mapping_fields/test_connection/dry_run؛
+  describe() برای serialize کامل متادیتای آداپتور (استفاده در UI).
+adapter_registry.discover_adapters(): با os.walk کل زیردرخت
+  ir_integration/adapters پویا اسکن می‌کند (نه فقط یک پوشه‌ی adapters
+  ثابت مثل ir_gateway، بلکه هر زیرپوشه دلخواه مانند sepidar/).
+
+4) آداپتور Sepidar (adapters/sepidar/)
+--------------------------------------------------------------------
+sepidar_mapping.py: DEFAULT_ACCOUNT_MAP/DEFAULT_DOCTYPE_MAP فارسی
+  (مثلاً freight_cost -> "هزینه حمل")، parse_json_map/
+  get_effective_mapping برای merge نگاشت‌های پیش‌فرض با نگاشت
+  ذخیره‌شده در Integration Mapping.
+sepidar_auth.py: SepidarAuthManager یک اسکلت خالی با
+  raise NotImplementedError("Phase 10B") - یعنی احراز هویت واقعی به
+  فاز آینده موکول شده (به‌صراحت در BACKLOG.md اپ هم مستند است).
+sepidar_adapter.py::SepidarAdapter: capabilities=[authentication,
+  customer, item, invoice, payment]؛ dry_run(action, payload, mapping)
+  یک preview کامل JSON برمی‌گرداند (بدون هیچ فراخوانی شبکه)؛
+  test_connection در حالت dry_run فقط True برمی‌گرداند، در غیر این
+  صورت NotImplementedError.
+
+5) سرویس مرکزی integration_service.py
+--------------------------------------------------------------------
+- is_integration_enabled()/is_feature_enabled(feature_name): کلید
+  Kill-Switch اصلی - اگر integration_enabled=0 باشد هیچ push یا pull
+  اجرا نمی‌شود (اثبات‌شده در verify: "kill switch blocks push when
+  disabled" -> status="feature_disabled").
+- get_configured_adapter(system_name): سند External System را خوانده،
+  config را با get_password (نه plain text) و config_json اضافی
+  می‌سازد و آداپتور واقعی را نمونه‌سازی می‌کند.
+- _prevent_duplicate: پنجره‌ی ۶۰ دقیقه‌ای برای همان
+  reference+system+action+status=success.
+- push_to_external(reference_doctype, reference_name, ...): زنجیره‌ی
+  کامل: بررسی enable -> بررسی adapter/system -> نگاشت action->
+  capability (cap_map) و بررسی adapter.supports() (اگر پشتیبانی
+  نشود status="not_implemented") -> بررسی duplicate (فقط در حالت
+  non-dry-run) -> اجرای dry_run() یا _dispatch_real_export() ->
+  ثبت Integration Log با request_payload کامل (JSON) -> در صورت
+  موفقیتِ non-dry-run، _save_external_id روی سند مرجع (فقط اگر فیلدهای
+  external_id/external_sync_status/last_external_sync وجود داشته
+  باشند - چک پویا با meta.has_field، نه فرض ثابت).
+- _dispatch_real_export: نگاشت صریح action->متد آداپتور (push_customer،
+  push_item، push_sales_invoice، push_purchase_invoice، push_payment)؛
+  اگر متد پیاده‌سازی نشده NotImplementedError صریح می‌دهد - چون فاز
+  10A هنوز push واقعی ندارد، این مسیر عملاً فقط زیرساخت آماده است.
+
+6) DocTypeها (۶ عدد فقط، Dashboard یک Page است نه DocType)
+--------------------------------------------------------------------
+External Integration Settings (Single؛ کلید integration_enabled +
+  hide_from_ui + ۹ پرچم ویژگی enable_* + کنترل دسترسی)
+External System (autoname=field:system_name؛ اعتبارسنجی پویا
+  adapter_id از رجیستری، نه از یک Select ثابت - "لیست معتبر پویا است")
+Integration Mapping (map_json باید JSON object معتبر باشد)
+Integration Log (autoname=hash؛ status شامل pending/success/failed/
+  duplicate/dry_run/queued/mismatch/not_implemented/feature_disabled)
+Integration Sync Status (istable=1، جدول فرزند)
+Reconciliation Rule (autoname=field:rule_name، برای فاز آینده‌ی
+  مغایرت‌گیری)
+
+7) Workspace ASCII و ترفند دوم ۴۰۴ (workspace_normalize.py)
+--------------------------------------------------------------------
+این فایل نیز دقیقاً همان الگوی fa.csv فاز ۹ را تکرار می‌کند اما با یک
+لایه‌ی دفاعی اضافه به نام setup/workspace_normalize.py که به‌طور صریح
+مستند می‌کند: "Frappe v15 مسیر سایدبار را از روی slug(title) می‌سازد
+اما در برابر slug(name) resolve می‌کند؛ عنوان فارسی -> 404 در
+/app/<persian-slug>". راه‌حل:
+  - CANONICAL = "IR Integration" (name==label==title انگلیسی ثابت)
+  - PERSIAN_DUPES: لیست صریح نام‌های فارسی/اسلاگ فارسی/نسخه‌های با
+    نیم‌فاصله (ZWNJ) که ممکن است از اجراهای قبلی باقی مانده باشند و
+    باید حذف شوند.
+  - normalize_workspace(): حذف Workspace های فارسی تکراری، اجبار
+    identity ASCII روی Workspace موجود یا ساخت shell حداقلی در صورت
+    نبودن، و پاک‌سازی پوشه‌های غیر-ASCII روی دیسک (_purge_persian_
+    workspace_folders، فقط داخل همین اپ - "Never edits other apps'
+    files").
+  - این تابع هم در after_migrate و هم after_install هوک هوکس.py ثبت
+    شده تا در هر migrate خودکار دوباره اجرا شود (خودترمیمی مداوم).
+  - ترجمه‌ی نمایشی از translations/fa.csv انجام می‌شود
+    ("IR Integration,یکپارچه‌سازی مالی و حسابداری,").
+  - نکته‌ی معماری اضافه: finance_workspace_visibility.js عمداً خالی
+    نگه داشته شده با توضیح این‌که نسخه‌ی قبلی یک اسکریپت سراسری داشت
+    که با جستجوی متن ترجمه‌شده‌ی "یکپارچه‌سازی" در DOM سعی می‌کرد
+    ویجت‌ها را مخفی کند، اما همین رشته با برچسب خودِ این Workspace هم
+    تطبیق پیدا می‌کرد و باعث می‌شد Workspace خودش بعد از SPA
+    page-change ناپدید شود - یک باگ ظریف که به‌طور کامل مستند و رفع
+    شده (حذف DOM-scraping سراسری، جایگزینی با is_integration_visible
+    سمت سرور per-form).
+
+8) نکات و ترفندهای جالب دیگر
+--------------------------------------------------------------------
+- verify_phase10.py::_set_integration_enabled(value): برای تست، مقدار
+  Single را با frappe.db.set_single_value ست کرده و به‌صورت دستی چند
+  لایه کش (document_cache, frappe.local.cache) را پاک می‌کند - چون
+  get_single از کش می‌خواند و تغییر مستقیم دیتابیس به‌تنهایی روی آن اثر
+  نمی‌گذارد.
+- اسکن امنیتی خودکار در verify: تمام فایل‌های سورس این اپ (به‌جز خودِ
+  verifier) با pathlib.rglob اسکن می‌شوند تا مطمئن شود هیچ‌جا نام سایت
+  (transport-dev.local) یا الگوهای ممنوع ("bench console", "exec(open")
+  هاردکد نشده - یک self-audit امنیتی خودکار در پایان فاز.
+
+9) وابستگی‌ها
+--------------------------------------------------------------------
+- به تمام اپ‌های قبلی (frappe, erpnext, ir_base, transport_ir,
+  ir_jalali, ir_gateway) required_apps دارد.
+- Custom Fieldهای یکپارچه‌سازی (external_system, external_id,
+  external_sync_status, last_external_sync, integration_mapping) به
+  Transport Case، Sales/Purchase Invoice، Payment Entry، Customer،
+  Supplier اضافه می‌شوند.
+
+10) خطرات / نقاط حساس
+--------------------------------------------------------------------
+- فاز 10B (اتصال JWT واقعی سپیدار) و 10C (مغایرت‌گیری/صف تلاش مجدد) در
+  BACKLOG ذکر شده‌اند اما در این فایل پیاده‌سازی نشده‌اند - یعنی
+  SepidarAdapter در وضعیت فعلی صرفاً یک "قالب آماده" است، نه اتصال
+  عملیاتی واقعی.
+====================================================================
+END

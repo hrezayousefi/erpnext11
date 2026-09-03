@@ -1,0 +1,116 @@
+====================================================================
+راهنمای فنی فایل: setup_phase7.sh  (v4 — "FULL REWRITE")
+مسیر: erpnext/setup_phase7.sh   (1351 خط - مطالعه کامل شد)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+لایه UI/UX و داشبورد مدیرعامل: شش Workspace نقش‌محور (CEO Dashboard،
+Finance، Iran Transport، Transport Purchase، Transport Sales، Customs)،
+یک پنل KPI تضمین‌شده روی CEO Dashboard که با جاوااسکریپت خالص و یک API
+سروری رندر می‌شود (نه ویجت بومی Number Card/Chart که "روی این نصب خالی
+رندر می‌شوند" مطابق کامنت)، آیکون‌های SVG سفارشی سایدبار، Kanban Board،
+Client Script نوار پیشرفت روی فرم و فیلترهای پیش‌فرض لیست بر اساس نقش.
+
+2) چرا "v4 — Root Cause Fixed"
+--------------------------------------------------------------------
+هدر فایل به‌طور مفصل توضیح می‌دهد که علت واقعی خالی ماندن داشبورد CEO
+در نسخه‌ی قبلی (v3) این بود: `frappe.get_route()` روی یک Workspace
+مقدار `["Workspaces", "CEO Dashboard"]` برمی‌گرداند، نه
+`["ceo-dashboard"]` — و شرط v3 که `route[0] === "ceo-dashboard"` را
+چک می‌کرد همیشه false بود و پنل بلافاصله پس از رندر حذف می‌شد. v4 تابع
+current_workspace() را می‌نویسد که:
+  - اگر route[0].toLowerCase()=="workspaces" باشد، route[1] را برمی‌گرداند
+  - در غیر این صورت با regex روی window.location.pathname پارس می‌کند
+    (fallback مبتنی بر URL)
+این یک نمونه‌ی عالی از "دیباگ واقعی مبتنی بر Console مرورگر" است که در
+کامنت فایل صراحتاً به آن اشاره شده: "ROOT CAUSE FIXED IN v4 (proven
+from browser console)".
+
+3) موتور KPI (public/js/ceo_dashboard_kpi.js + api/ceo_kpi.py)
+--------------------------------------------------------------------
+- سمت سرور (ceo_kpi.py::get_ceo_kpi) یک whitelist method با
+  ALLOWED_ROLES محدود (CEO, System Manager, Financial Manager, Finance
+  Supervisor, Transport Supervisor) که سه بخش برمی‌گرداند:
+    counts: ۷ شمارنده (in_transit, pending_transport, waiting_bijak,
+      waiting_clearance, pending_payment, pending_finance, completed,
+      total) با یک کوئری SQL تجمیعی (group by workflow_state)
+    totals: مجموع tonnage/profit/freight/customs/clearance فقط برای
+      Completed
+    charts: سه گروه‌بندی (by_border, by_factory, by_customer) با کوئری
+      SQL پارامتریک (template فقط از GROUPS ثابت داخل کد ساخته می‌شود،
+      نه از ورودی کاربر - جلوگیری از SQL Injection)
+- سمت کلاینت: watchdog هر ۱.۵ ثانیه بررسی می‌کند که آیا در صفحه‌ی هدف
+  هستیم و پنل وجود ندارد -> رندر می‌کند؛ اگر DOM host هنوز آماده نیست
+  تا ۲۴ بار (هر ۲۵۰ms) تلاش مجدد می‌کند. این "polling defensive
+  rendering" واکنشی به رفتار غیرقطعی زمان لود Desk SPA فریمورک Frappe
+  است.
+- تصمیم معماری آگاهانه: "CEO workspace content دیگر بلوک‌های بومی
+  number_card/chart را embed نمی‌کند" چون آن ویجت‌ها روی این نصب خالی
+  رندر می‌شوند؛ اما اسناد Number Card/Dashboard Chart همچنان در دیتابیس
+  و فیکسچر باقی می‌مانند (برای سازگاری آینده اگر باگ فریم‌ورک رفع شد).
+- نمودارهای CSS-only (بدون کتابخانه‌ی نمودار) عمداً به‌جای Dashboard
+  Chart استاندارد استفاده شده تا "باگ RTL شکل حروف در legend فارسی
+  ماژول استاندارد Projects" دور زده شود (نکته‌ی جالب و مستند در
+  BACKLOG.md به‌عنوان محدودیت شناخته‌شده‌ی بالادستی).
+
+4) شش Workspace نقش‌محور
+--------------------------------------------------------------------
+CEO Dashboard(tir-dashboard)/Finance(tir-finance)/Iran Transport
+(tir-truck)/Transport Purchase(tir-buy)/Transport Sales(tir-sell)/
+Customs(tir-customs) — هرکدام با آیکون SVG اختصاصی (اسپرایت
+transport_sprite.svg با ۶ symbol متفاوت + ensure_icons.js که اسپرایت
+را در body تزریق می‌کند)، roles اختصاصی + همیشه System Manager اضافه
+می‌شود، shortcuts و content cards.
+کد این بخش (workspace() تابع پایتونی داخل هیر-داک) به‌صورت برنامه‌ای
+(نه فقط JSON استاتیک) هر Workspace را می‌سازد تا از تکرار کد جلوگیری
+شود.
+
+5) سایر اجزا
+--------------------------------------------------------------------
+- setup_ui_phase7.py::setup_ui_phase7(): تابع idempotent که Number
+  Cardها (۱۱ عدد: Transport KPI - In Transit ... Completed Clearance)،
+  Dashboard Chartها (۳ عدد: by Border/Factory/Customer)، Kanban Board
+  (با حالت‌های امن — بدون Draft/On Hold/Cancelled/Rejected تا drag&drop
+  با گاردهای فاز۶ تصادم نکند) و ۶ Workspace را می‌سازد؛ همچنین
+  Workspaceهای قدیمی فارسی/اشتباه را حذف می‌کند
+  (["داشبورد مدیرعامل","امور مالی",...])
+- patches/v1_0/phase7_ui.py با ثبت در patches.txt زیر بخش
+  [post_model_sync] - یعنی این تابع بعد از هر migrate خودکار هم اجرا
+  می‌شود، نه فقط زمان نصب اولیه (تفاوت مهم با فازهای قبلی که فقط
+  یک‌بار دستی صدا زده می‌شوند).
+- verify_phase7.py: شامل فراخوانی زنده‌ی get_ceo_kpi() و بررسی وجود
+  کلیدهای دقیق پاسخ، بررسی محتوای Workspace CEO (نباید بلوک
+  number_card/chart داشته باشد)، بررسی ترجمه‌های فارسی حالت‌های
+  Workflow.
+- Client Script دوگانه: Form (نوار پیشرفت با درصد بر اساس نگاشت
+  progress[state])و List (فیلتر پیش‌فرض بر اساس نقش کاربر - مثلاً
+  Transport User - Purchase فقط case_type=='خرید' می‌بیند).
+
+6) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- "دیاگنوستیک غیرمخرب سوکت‌آی‌او": چک می‌کند پورت ۹۰۰۰ (socket.io) باز
+  است یا نه و فقط warn می‌دهد؛ توضیح می‌دهد که نبود realtime روی داشبورد
+  CEO اثر ندارد اما روی اعلان‌های آنی اثر دارد.
+- بررسی فیزیکی دارایی‌ها بعد از build: چک `[[ -e sites/assets/... ]]`
+  برای اطمینان از این‌که symlink دارایی‌ها واقعاً وجود دارد.
+
+7) وابستگی‌ها
+--------------------------------------------------------------------
+- به تمام DocTypeهای فاز ۶ (Transport Case و زیرمجموعه‌ها) وابسته است.
+- خروجی این فاز (۶ Workspace، پنل KPI) در فاز ۸ (گزارش‌ها) و فاز ۱۲
+  (داشبوردهای کاملاً جدید Page-based) بازاستفاده/گسترش می‌یابد؛ نکته
+  مهم: فاز ۱۲ به‌جای این Workspaceها، صفحات (Page) کاملاً جدید با
+  route انگلیسی می‌سازد و آن‌ها موازی با Workspaceهای این فاز باقی
+  می‌مانند (دو لایه‌ی داشبورد که با هم تداخل مستقیم ندارند چون route
+  متفاوت دارند).
+
+8) خطرات / نقاط حساس
+--------------------------------------------------------------------
+- منطق ceo_dashboard_kpi.js با setInterval هر ۱۲۰ ثانیه در فاز ۱۲
+  (transport_phase12.js) دوباره تکرار می‌شود اما با API متفاوت
+  (phase12_workspaces.api.dashboard) - یعنی از فاز ۷ به بعد دو موتور
+  KPI مستقل (فاز ۷ و فاز ۱۲) به‌صورت موازی روی سیستم فعال می‌مانند،
+  که با اصل "یک موتور واحد" در سند V3 در تناقض است.
+====================================================================
+END

@@ -1,0 +1,2487 @@
+================================================================================
+Technical Specification of the Code File
+FILE UNDER ANALYSIS : setup_phase8.sh
+TITLE IN HEADER     : "setup_phase8.sh — FINAL (Smart Excel Sync Edition)"
+TARGET PLATFORM     : ERPNext v15 / Frappe v15
+ANALYSIS PASS       : 3 (independent re-derivation)
+DOCUMENT GOAL       : این سند جایگزین کامل فایل اصلی است. هر هوش مصنوعی دیگری با
+                      خواندن این سند باید بتواند بدون دیدن فایل، رفتار فاز ۸ را
+                      بفهمد، به سؤالات دربارهٔ آن پاسخ دهد، تغییر سازگار پیشنهاد
+                      کند، فازهای قبلی را از روی مطالبات اثبات‌شده بازسازی کند و
+                      فازهای بعدی را با همان قراردادها بنویسد.
+================================================================================
+
+
+################################################################################
+# 0. قرارداد سند / ANCHORING CONVENTION
+################################################################################
+
+0.1 چرا «شماره خط» به‌صورت لنگر متنی ثبت شده است
+    محتوای فایل به‌صورت متن پیوسته ارائه شد و شماره خط نداشت. طبق قانون ۶ سند،
+    یک شماره‌گذاری پایدار خودم تعریف کردم و در تمام سند ثابت نگه داشتم. لنگر
+    انتخابی، خودِ فراخوانی‌های `step "..."` هستند که در متن فایل واقعی وجود دارند
+    و در هر محیطی با grep قابل بازیابی‌اند.
+
+    قالب ارجاع در کل سند:
+        [source: STEP <id> :: <block/file> :: <symbol>]
+
+    مثال:
+        [source: STEP 6 :: report/trade_transport_1405/trade_transport_1405.py ::
+                 _build_report_rows]
+
+0.2 فهرست کامل لنگرها (نقشهٔ خطی فایل)
+    S-HDR   شِبانگ + بلوک کامنت هدر + set -euo pipefail + متغیرها + هلپرها
+    S-00    step "0) preflight + services"
+    S-0B    step "0b) openpyxl dependency"
+    S-01    step "1) Trade Case + Transport Case fields"
+    S-02    step "2) Trade Case invoice synchronization"
+    S-03    step "3) canonical Jalali Jinja helpers"
+    S-04    step "4) hooks.py phase 8 merge"
+    S-05    step "5) standard report definitions"
+    S-06    step "6) Trade Transport 1405 report"
+    S-07    step "7) Freight Report"
+    S-08    step "8) Customs Report"
+    S-09    step "9) Tonnage Report"
+    S-10    step "10) Profit Report"
+    S-11    step "11) Stalled Cases Report"
+    S-12    step "12) Payments Report"
+    S-13    step "13) Daily Summary Report"
+    S-14    step "14) Packing Report"
+    S-15    step "15) RTL Print Formats"
+    S-16    step "16) secure Excel API"
+    S-17    step "17) Trade Case Excel UI"
+    S-175   step "17.5) Custom Excel Layer (Golden Rules Sync, Production Ready)"
+    S-18    step "18) Persian translations"
+    S-19    step "19) Workspace report links"
+    S-20    step "20) setup_phase8.py"
+    S-21    step "21) verify_phase8.py"
+    S-22    step "22) pre-migrate structural checks"
+    S-23    step "23) build + migrate + setup + verify"
+    S-24    step "24) git commit"
+    S-END   step "DONE" + heredoc خلاصهٔ فارسی
+
+0.3 برچسب‌های اطمینان
+    [Fact]      — عیناً در متن فایل مشاهده شده.
+    [Inference] — برداشت تحلیلی از شواهد داخل همین فایل، بدون منبع بیرونی.
+    [Unknown]   — از این فایل قابل تعیین نیست.
+
+0.4 اعلام پوشش
+    کل بازهٔ فایل بررسی شد: از خط `#!/usr/bin/env bash` تا انتهای heredoc با
+    ترمیناتور `FINAL` که پس از `step "DONE"` می‌آید. فایل در سه پیام دریافت شد؛
+    نقطهٔ برش پیام دوم/سوم داخل تابع `_file_bytes` در `report_excel_custom.py`
+    (روی خط `doc.check_permission("read")`) بود و به‌صورت پیوسته تحلیل شد. [Fact]
+
+
+################################################################################
+# 1. اطلاعات کلی فایل
+################################################################################
+
+1.1 زبان‌های قابل تشخیص  [Fact]
+    (a) Bash — زبان میزبان. شِبانگ `#!/usr/bin/env bash`، حالت سخت‌گیرانه
+        `set -euo pipefail`.
+    (b) Python 3 — در دو نقش کاملاً متمایز که تفکیک آن‌ها برای فهم فایل حیاتی است:
+          • Python «زمان نصب» (install-time): داخل `python3 <<'PYEOF' ... PYEOF`
+            اجرا می‌شود، فایل‌های JSON/JS پروژه را می‌خواند و بازنویسی می‌کند و
+            بعد از پایان اسکریپت دیگر وجود ندارد.
+          • Python «زمان اجرا» (runtime): داخل `write_utf8 <path> <<'EOF' ... EOF`
+            فقط به‌عنوان متن نوشته می‌شود، روی دیسک می‌نشیند و بعداً توسط Frappe
+            اجرا می‌شود.
+    (c) JavaScript — سه دسته: `frappe.query_reports[...]` برای فیلتر/دکمهٔ گزارش،
+        `frappe.ui.form.on(...)` برای فرم، `frappe.listview_settings[...]` برای لیست.
+    (d) JSON — تعریف Report، Print Format، Workspace، fixture ترجمه، DocType.
+    (e) SQL — لهجهٔ MariaDB/MySQL: بک‌تیک برای نام جدول (`` `tabTrade Case` ``)،
+        `ifnull`, `nullif`, `date_format`, `timestampdiff`, `if(...)`.
+    (f) Jinja2 + HTML — بدنهٔ چهار Print Format راست‌به‌چپ.
+
+1.2 نوع فایل  [Fact]
+    اسکریپت نصب/ارتقای مرحله‌ای (phase installer). هدر فایل صریحاً می‌گوید:
+    `File-First | Idempotent | No bench console | No site drop`.
+    یعنی فلسفهٔ طراحی: اول فایل منبع نوشته شود، سپس با `bench migrate` وارد DB
+    شود؛ نه دستکاری مستقیم دیتابیس، نه حذف سایت.
+
+1.3 نقش کلی فایل  [Fact]
+    استقرار «فاز ۸» اپ `transport_ir` شامل:
+      • افزودن ۶ فیلد به `Trade Case` و ۶ فیلد به `Transport Case`
+      • هوک همگام‌سازی فاکتور از پروندهٔ تجاری به پرونده‌های حمل
+      • هلپرهای جینجای فارسی با تک‌منبع بودن تقویم جلالی
+      • ۹ گزارش Script Report
+      • ۴ Print Format فارسی RTL
+      • یک API اکسل امن (۷ endpoint)
+      • یک «لایهٔ اکسل اختصاصی» مبتنی بر ۵ قالب واقعی کارفرما (۷ endpoint)
+      • ترجمهٔ فارسی، دو کارت گزارش در ۶ Workspace
+      • اسکریپت setup/backfill و اسکریپت verify
+      • چک ساختاری پیش از migrate، سپس build/migrate/setup/verify/commit
+
+1.4 نقطهٔ ورود  [Fact]
+    اجرای مستقیم شل‌اسکریپت. تابع `main` وجود ندارد. اجرا کاملاً خطی و ترتیبی است
+    و هر STEP به نتیجهٔ STEPهای قبلی وابسته است.
+
+1.5 ورودی‌های کلی  [Fact]
+    • ثابت‌های سخت‌کدشده: `SITE_NAME="transport-dev.local"`,
+      `BENCH_DIR="${HOME}/frappe-bench"`, `APP="transport_ir"`,
+      `JALALI_APP="ir_jalali"`.
+    • وضعیت دیسک: وجود bench، سایت، اپ، `hooks.py` و چهار JSON از فازهای ۵/۶.
+    • وضعیت دیتابیس سایت: نصب بودن ۵ اپ و وجود ۵ DocType.
+    • ورودی اختیاری: پوشهٔ `excel_client_files/` کنار اسکریپت (`SCRIPT_DIR`) یا
+      داخل `APP_ROOT`، حاوی `template_*.xlsx` و `client_logo.png`.
+
+1.6 خروجی‌های کلی  [Fact]
+    • حدود ۳۵ فایل نوشته/بازنویسی‌شده زیر
+      `apps/transport_ir/transport_ir/iran_transport/...`
+    • append در `apps/transport_ir/requirements.txt`
+    • بلوک مارکردار در `apps/transport_ir/transport_ir/hooks.py`
+    • کپی قالب‌ها در `sites/<site>/private/files/excel_templates/`
+    • رکوردهای Report / Print Format / Workspace / Translation پس از migrate
+    • لاگ رنگی روی stdout؛ خروج با کد ≠ 0 در هر خطا
+    • یک commit در ریپوی گیت اپ
+
+1.7 وابستگی به محیط  [Fact]
+    ابزار: `bench`, `python3`, `git`, `iconv`, `ss`, `pgrep`, `redis-cli`, `awk`,
+    `mktemp`, `nohup`, `grep`, `seq`, `date`.
+    اپ‌ها: `frappe`, `erpnext`, `ir_base`, `transport_ir`, `ir_jalali`.
+    پکیج پایتون: `openpyxl>=3.1,<4`.
+    سرویس: MariaDB، Redis cache، پورت ۸۰۰۰ برای تشخیص bench روشن.
+
+1.8 سطح اطمینان کلی
+    ساختار، نام‌ها، امضاها، رشته‌های SQL، قراردادهای اکسل، مسیرهای خطا → بالا [Fact].
+    شمارش دقیق تعداد توابع → متوسط [Inference].
+    رفتار روی دادهٔ واقعی و ساختار واقعی DocTypeها → [Unknown].
+
+
+################################################################################
+# 2. خلاصهٔ رفتاری (بر پایهٔ رفتار اثبات‌شدهٔ کد)
+################################################################################
+
+این فایل «منطق کسب‌وکار در حال اجرا» نیست؛ یک **نصاب** است که منطق کسب‌وکار را
+تولید می‌کند. رفتار واقعی گام‌به‌گام:
+
+ 1. دروازهٔ ورودی سخت‌گیرانه — چهار مسیر، چهار JSON فاز ۵/۶، پنج اپ، پنج DocType،
+    آمادگی Redis و پاس شدن تست مرجع جلالی. هر شکست ⇒ `exit 1`. [S-00]
+ 2. اگر bench روشن نبود، با `nohup bench start` بالا می‌آید و PID در
+    `/tmp/bench-start-phase8.pid` ذخیره می‌شود. [S-00]
+ 3. `openpyxl` به requirements اضافه و در صورت نبود نصب می‌شود. [S-0B]
+ 4. مدل داده با upsert فیلدها گسترش می‌یابد؛ ترتیب فیلدها کنترل‌شده است. [S-01]
+ 5. هوک `Trade Case.on_update` چهار فیلد فاکتور را روی پرونده‌های حمل **فعال**
+    همان Trade Case می‌نویسد، بدون تغییر `modified`. [S-02 + S-04]
+ 6. تمام تبدیل جلالی از `ir_jalali` می‌آید؛ verify حتی نبودِ پیاده‌سازی دوم را
+    بررسی می‌کند. [S-03 + S-21]
+ 7. ۹ گزارش با الگوی مشترک ساخته می‌شوند: پوشه snake_case، رکورد Title Case،
+    فیلترهای فارسی، و در بیشتر آن‌ها دو مسیر «جزئیات» و «تجمیعی». [S-05..S-14]
+ 8. چهار Print Format جینجای RTL برای چهار DocType واقعی فاز ۵/۶ ساخته می‌شود و
+    دو پوشهٔ منسوخِ نسخهٔ رد شده حذف می‌شود. [S-15]
+ 9. لایهٔ اکسل استاندارد با گارد نقش، سقف حجم/ردیف و ایمپورت تراکنشی. [S-16]
+10. لایهٔ اکسل اختصاصی: قالب واقعی کارفرما را در حافظه باز می‌کند، فقط ناحیهٔ داده
+    را می‌نویسد، merge/فرمول/استایل/ستون مخفی/جهت شیت/لوگو را حفظ می‌کند، متن
+    غلط‌املایی کارفرما را عمداً اصلاح نمی‌کند، و ایمپورت را چهارمرحله‌ای
+    (Preview → Validate → Resolve → Commit) و تراکنشی انجام می‌دهد. [S-175]
+11. ترجمه، دو کارت Workspace («استاندارد» و «اختصاصی»)، backfill، verify،
+    چک ساختاری، سپس build → migrate → setup → verify → commit. [S-18..S-24]
+
+
+################################################################################
+# 3. نقشهٔ ساختاری فایل (بالا به پایین)
+################################################################################
+
+S-HDR
+    • شِبانگ + بلوک کامنت ۴۰ خطی که «۶ تضمین کلیدی» را فهرست می‌کند:
+        1) نام واقعی DocTypeهای فاز ۶ (Transport Waybill / Transport Weighbridge)
+        2) پوشهٔ snake_case ولی نام/کلید Title Case
+        3) محاسبهٔ مستقل خرید و فروش بر اساس Trade Case.case_type
+        4) تک‌منبع بودن جلالی از ir_jalali
+        5) ایمپورت اکسل با resolve از file_url + چک مجوز/نوع/حجم/سقف ردیف، تراکنشی
+        6) لایهٔ اکسل اختصاصی با «قوانین طلایی» و پنج قالب کارفرما
+    • پیش‌نیاز اعلام‌شده:
+      `phase2 -> phase3 -> phase4 -> realign_gate -> ir_jalali -> phase5 -> phase6
+       -> phase7 -> phase8`
+    • `set -euo pipefail`، سه export انکودینگ، `SCRIPT_DIR`، شش متغیر مسیر،
+      `NOW_TS`، چهار متغیر رنگ، و شش تابع کمکی.
+
+S-00 … S-END : همان ترتیبی که در بند 0.2 فهرست شد.
+
+نکتهٔ ساختاری مهم [Inference]: فایل یک الگوی تکرارشونده دارد —
+«step → (heredoc پایتون یا write_utf8) → log» — و همین الگو باعث می‌شود فازهای
+دیگر پروژه (۲ تا ۷ و ۹ به بعد) با احتمال بالا از همین قالب پیروی کنند.
+
+
+################################################################################
+# 4. Importها و وابستگی‌ها
+################################################################################
+
+4.1 وابستگی‌های سطح شل
+┌─────────────┬────────────────┬────────────────────────────────────────────────┐
+│ نام         │ محل استفاده    │ کاربرد واقعی                                   │
+├─────────────┼────────────────┼────────────────────────────────────────────────┤
+│ bench       │ S-00,0B,23     │ use / list-apps / execute / pip / build /      │
+│             │                │ migrate / clear-cache                          │
+│ iconv       │ write_utf8     │ فقط اعتبارسنجی UTF-8؛ نبودش ⇒ skip بی‌صدا      │
+│ ss          │ S-00           │ تشخیص پورت ۸۰۰۰ و پورت redis                   │
+│ pgrep       │ S-00           │ تشخیص `bench start|honcho` در حال اجرا         │
+│ redis-cli   │ S-00           │ ping روی پورت cache                            │
+│ awk         │ S-00           │ استخراج `port` از redis_cache.conf             │
+│ git         │ S-24           │ config مشروط + add -A + commit                 │
+│ python3     │ S-01,04,15,    │ ویرایش JSON/JS + ast.parse                     │
+│             │ 17.5,18,19,22  │                                                │
+│ mktemp/mv   │ write_utf8     │ نوشتن شبه‌اتمیک                                │
+└─────────────┴────────────────┴────────────────────────────────────────────────┘
+
+4.2 importهای پایتونِ زمان اجرا  [Fact]
+
+  utils/jinja_helpers.py            [S-03]
+      re
+      frappe.utils: flt, fmt_money, get_datetime
+      ir_jalali.utils.jalali: format_jalali      ← تنها منبع تقویم
+
+  phase8/events.py                  [S-02]
+      frappe   (db.exists, get_all, db.set_value)
+
+  report/*/*.py  (۹ فایل)            [S-06..S-14]
+      frappe ; frappe._ ; frappe.utils.flt
+
+  api/report_excel.py               [S-16]
+      io, re, frappe, frappe._, frappe.utils.flt
+      transport_ir...jinja_helpers.latin_jalali_date
+      import‌های تنبل داخل توابع:
+          openpyxl.Workbook
+          openpyxl.styles.{Alignment, Font, PatternFill}
+          openpyxl.utils.get_column_letter
+          ماژول گزارش‌ها (داخل خود endpoint)  ← جلوگیری از چرخهٔ import [Inference]
+
+  api/report_excel_custom.py        [S-175]
+      datetime, io, json, os, re
+      copy.copy
+      frappe, frappe._, frappe.utils.{flt, getdate}
+      openpyxl
+      openpyxl.cell.cell.MergedCell
+      openpyxl.drawing.image.Image as XLImage
+      openpyxl.utils.{column_index_from_string, get_column_letter}
+      openpyxl.worksheet.cell_range.CellRange
+      از report_excel: FINANCE_ROLES, MAX_IMPORT_FILE_SIZE, MAX_IMPORT_ROWS,
+                       OPERATIONS_ROLES, RUNNING_TOTAL_FIELDS, _guard, _send
+      از jinja_helpers (داخل try/except ImportError با سه fallback محلی):
+                       latin_jalali_date, normalize_persian, to_persian_digits
+
+  setup_phase8.py                   [S-20]   json, os, frappe
+  verify_phase8.py                  [S-21]   importlib, inspect, os, frappe
+
+4.3 وابستگی‌هایی که import شده‌اند ولی کاربردشان مشخص نیست
+    • `RUNNING_TOTAL_FIELDS` در report_excel_custom — import شده، مصرف نشده. [Fact]
+    • `to_persian_digits` در report_excel_custom — import شده، مصرف نشده. [Fact]
+    • `get_column_letter` در report_excel_custom — فقط در `find_header_row_fuzzy`
+      که خودش فراخوانی نمی‌شود. [Fact]
+    • `XLImage` — فقط در شاخه‌ای که هر ۵ قالب آن را `False` کرده‌اند. [Fact]
+
+
+################################################################################
+# 5. ثابت‌ها، متغیرها و State
+################################################################################
+
+5.1 سطح Bash  [Fact — S-HDR]
+
+  SITE_NAME        = "transport-dev.local"        (سخت‌کد، هرگز تغییر نمی‌کند)
+  BENCH_DIR        = "${HOME}/frappe-bench"
+  APP              = "transport_ir"
+  JALALI_APP       = "ir_jalali"
+  APP_ROOT         = "${BENCH_DIR}/apps/${APP}"
+  PKG              = "${APP_ROOT}/${APP}"
+  MOD              = "${PKG}/iran_transport"       ← ریشهٔ همهٔ خروجی‌ها
+  HOOKS            = "${PKG}/hooks.py"
+  SCRIPT_DIR       = مسیر واقعی اسکریپت (برای یافتن excel_client_files)
+  NOW_TS           = "$(date '+%Y-%m-%d %H:%M:%S').000000"
+  GREEN/YELLOW/RED/NC = کدهای ANSI
+  REPORT_ROOT      = "${MOD}/report"
+  PRINT_ROOT       = "${MOD}/print_format"
+  REQ_FILE         = "${APP_ROOT}/requirements.txt"
+  REDIS_CACHE_CONF = "${BENCH_DIR}/config/redis_cache.conf"
+  REDIS_CACHE_PORT = از conf با awk، وگرنه "13000"
+  REDIS_READY      = 0 → 1
+  TEMPLATE_SRC     = "" → SCRIPT_DIR/excel_client_files یا APP_ROOT/excel_client_files
+
+  ▸ Side effect مهم NOW_TS: چون یک‌بار در ابتدا محاسبه می‌شود، همهٔ JSONهای یک
+    اجرا timestamp یکسان می‌گیرند. اما `upsert_fields` هوشمندانه فقط در صورت
+    تغییر واقعی `modified` را می‌نویسد، در حالی که Report/Print/Workspace همیشه
+    NOW_TS تازه می‌گیرند ⇒ ناهمگونی idempotency (بخش ۱۷).
+
+5.2 ثابت‌های زمان اجرا  [Fact]
+
+  phase8/events.py
+      INVOICE_FIELDS = ("sales_invoice_number", "sales_invoice_date",
+                        "purchase_invoice_number", "purchase_invoice_date")
+
+  utils/jinja_helpers.py
+      _FA_DIGITS        = "۰۱۲۳۴۵۶۷۸۹"
+      _ZERO_WIDTH       = (ZWSP \u200b, ZWNJ \u200c, ZWJ \u200d,
+                           LRM \u200e, RLM \u200f, BOM \ufeff)
+      _DIACRITICS       = re.compile(r"[\u064B-\u065F\u0670]")
+      _TO_LATIN_DIGITS  = maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+      _TO_PERSIAN_DIGITS= maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+
+  report/trade_transport_1405
+      ACTIVE_TRANSPORT_STATES = ("Cancelled", "Rejected")   ← تعریف‌شده، مصرف‌نشده
+
+  report/freight_report
+      PERIOD_EXPRESSIONS  = {"روزانه": date_format(...,'%%Y-%%m-%%d'),
+                             "ماهانه": '%%Y-%%m', "سالانه": '%%Y'}
+      DIMENSION_EXPRESSIONS = {"راننده": t.driver, "باربری": t.carrier,
+                               "مشتری": t.customer, "کارخانه": t.supplier_factory}
+
+  report/customs_report
+      DIMENSIONS = {"مرز": t.border, "اظهار": t.declaration_number,
+                    "ترخیص‌کار": t.customs_broker, "راننده": t.driver}
+
+  report/tonnage_report
+      DIMENSIONS = {"مرز": t.border, "کارخانه": t.supplier_factory,
+                    "مشتری": t.customer, "باربری": t.carrier}
+
+  report/profit_report
+      DIMENSIONS          = {"مشتری": tc.customer, "کارخانه": tc.supplier_factory}
+      TRANSPORT_COST_JOIN = ساب‌کوئری تجمیع هزینهٔ حمل per trade_case
+
+  report/daily_summary_report
+      PERIODS = {"روزانه","ماهانه","سالانه"} با همان date_format ها
+
+  api/report_excel.py
+      FINANCE_ROLES        = {System Manager, CEO, Financial Manager,
+                              Finance Supervisor, Finance User}
+      OPERATIONS_ROLES     = FINANCE_ROLES | {Transport Supervisor,
+                              Transport User - Purchase, Transport User - Sales,
+                              Customs Officer}
+      MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024
+      MAX_IMPORT_ROWS      = 2000
+      RUNNING_TOTAL_FIELDS = {cship_s, csur_s, crem_s, cship_p, csur_p, crem_p}
+
+  api/report_excel_custom.py
+      UNRESOLVED           = None
+      HEADER_ALIASES       = {"هزنیه تخلیه":("هزینه تخلیه",),
+                              "هزنیه بارگیری":("هزینه بارگیری",),
+                              "پگینگ":("پکینگ",), "ترخیصکار":("ترخیص‌کار",),
+                              "تامین کننده":("تأمین‌کننده",),
+                              "data":("date","تاریخ"), "مبدا":("مبدأ",)}
+      LINK_DISPLAY_PRIORITY= (full_name, driver_name, carrier_name, broker_name,
+                              representative_name, border_name, customer_name,
+                              supplier_name, factory_name, item_name,
+                              company_name, case_title, title)
+      TEMPLATE_REGISTRY    = ۵ کلید: financial، freight، packing، purchase، dispatch
+      _FORMULA_REF         = re.compile(r"(\$?[A-Za-z]{1,3})(\$?)(\d+)")
+      FREIGHT_SPECS / PURCHASE_SPECS / LOADING_SPECS / DISPATCH_SPECS
+
+  setup_phase8.py
+      WORKSPACE_FOLDERS  = (ceo_dashboard, finance, iran_transport,
+                            transport_purchase, transport_sales, customs)
+      STALE_REPORT_NAMES = (freight_report, customs_report, tonnage_report,
+                            profit_report, stalled_cases_report, payments_report,
+                            daily_summary_report, packing_report)
+
+  verify_phase8.py
+      REPORTS        = ۹ مدخل  name -> (directory, ref_doctype)
+      PRINT_FORMATS  = ۴ مدخل  name -> doc_type
+
+5.3 State زمان اجرا (تغییرپذیر)  [Fact]
+      frappe.response                    ← در _send مقداردهی می‌شود (خروجی باینری)
+      frappe.flags.in_patch              ← در setup_phase8 برابر True
+      frappe.listview_settings["Trade Case"] / ["Transport Case"]
+      frappe.query_reports[<9 report names>]
+      listview.__phase8_excel_buttons    ← گارد ضدتکرار دکمه‌ها
+      listview.__phase8_custom_excel_buttons
+      SyncLog.entries                    ← رشد در طول یک درخواست export
+
+
+################################################################################
+# 6. کلاس‌ها
+################################################################################
+
+در کل فایل **دقیقاً یک کلاس** تعریف شده است.  [Fact]
+
+6.1 class SyncLog
+    خطوط تعریف : بعد از `_alias_keys` و پیش از TEMPLATE_REGISTRY
+                 [source: S-175 :: api/report_excel_custom.py :: SyncLog]
+    مسئولیت واقعی
+        جمع‌آوری ردِ ساختاریافتهٔ هر تصمیم نگاشت (mapping decision) و در پایان
+        نوشتن آن در لاگر `phase8_excel_sync`. هیچ منطق تجاری دیگری ندارد و
+        مقدار برگشتی هیچ export ای را تغییر نمی‌دهد.
+    فیلدها
+        template_key : str
+        source_file  : str
+        entries      : list[dict]
+    سازنده
+        __init__(self, template_key, source_file) -> None
+        مقداردهی سه فیلد؛ entries = [].
+    متدها
+        add(self, source_sheet=None, source_cell=None, source_row=None,
+            destination_doctype=None, destination_field=None, raw_value=None,
+            normalized_value=None, match_method=None, confidence=None,
+            action=None, status="ok", error=None) -> None
+            • همهٔ ۱۲ پارامتر اختیاری‌اند؛ یک dict با دقیقاً همین ۱۲ کلید append می‌شود.
+            • هیچ اعتبارسنجی/نرمال‌سازی ندارد.
+            • side effect: رشد entries.
+        unresolved(self) -> list[dict]
+            • فیلتر ورودی‌هایی با status == "unresolved".
+            • ⚠ در کل فایل فراخوانی نمی‌شود. [Fact]
+        flush(self) -> None
+            • json.dumps با ensure_ascii=False و default=str
+            • برش entries[:MAX_IMPORT_ROWS]
+            • کل بدنه داخل try/except Exception: pass  ⇒ خطای لاگ بی‌صدا
+    state داخلی
+        فقط entries؛ بدون سقف داخلی (سقف فقط هنگام flush اعمال می‌شود).
+    وابستگی‌ها
+        json، frappe.logger، MAX_IMPORT_ROWS
+    رابطه با سایر بخش‌ها
+        ساخته‌شده در `_load_and_fill_report`؛ پاس داده‌شده به
+        `_apply_title`، `_build_column_mapping`، `_fill_sheet`،
+        `_rewrite_sum_formulas`، `_fill_meta_cells`.
+        هیچ‌یک از دو تابع import آن را نمی‌سازند.
+    تناقض نام/کامنت
+        بخش DONE و docstring ماژول از «Sync Log کامل» برای import صحبت می‌کنند،
+        در حالی که مسیر import هیچ SyncLog ای نمی‌سازد. → بخش ۱۷ مورد ۵.
+    سطح اطمینان : [Fact]
+
+
+################################################################################
+# 7. توابع و متدها
+################################################################################
+
+قالب هر مدخل:
+  نام | محل | دسترسی | پارامترها/پیش‌فرض | بازگشتی | پیش‌شرط | مراحل | شاخه/حلقه |
+  فراخوانی‌ها | تغییر state | side effect | خطا | ورودی نامعتبر | مرزی | اطمینان | منبع
+
+────────────────────────────────────────────────────────────────────────────────
+7.1  توابع Bash                                                    [source: S-HDR]
+────────────────────────────────────────────────────────────────────────────────
+
+■ log(msg)
+  دسترسی: داخلی | پارامتر: $* | بازگشتی: ندارد
+  مراحل: echo -e با رنگ سبز و پیشوند `[OK]`
+  side effect: stdout | خطا: ندارد | اطمینان: Fact
+
+■ warn(msg)
+  echo زرد با `[!!]`. **اجرا را متوقف نمی‌کند** — این تفاوت با err حیاتی است،
+  چون سه سناریوی «مطلوب ولی غیرالزامی» با warn عبور می‌کنند:
+  bench از قبل روشن، openpyxl از قبل در requirements، excel_client_files غایب،
+  و شکست git commit. | اطمینان: Fact
+
+■ err(msg)
+  echo قرمز روی stderr سپس `exit 1`. تنها مسیر خروج کنترل‌شدهٔ اسکریپت. | Fact
+
+■ step(msg)
+  چاپ هدر بخش با خط تیره و رنگ زرد. لنگر ساختاری کل سند. | Fact
+
+■ write_utf8(target)
+  پارامتر: $1 = مسیر مقصد | محتوا: از **stdin** (heredoc)
+  مراحل به ترتیب:
+      1) tmp="$(mktemp)"
+      2) cat > "$tmp"
+      3) if command -v iconv ; then iconv -f UTF-8 -t UTF-8 "$tmp" >/dev/null
+         || err "Invalid UTF-8: ${target}"
+      4) mkdir -p "$(dirname "$target")"
+      5) mv -f "$tmp" "$target"
+      6) log "write: $target"
+  حالت مرزی حیاتی: اگر `iconv` نصب نباشد، هیچ اعتبارسنجی‌ای انجام **نمی‌شود** و
+  فایل بدون بررسی نوشته می‌شود. [Fact]
+  side effect: بازنویسی کامل فایل مقصد (شبه‌اتمیک به‌خاطر mv). | Fact
+
+■ site_has_app(site, app)
+  بازگشتی: کد وضعیت (0/1)
+  پیاده‌سازی: `bench --site "$site" list-apps 2>/dev/null
+               | grep -qE "^${app}([[:space:]]|$)"`
+  رفتار مرزی: خطای bench به stderr هدایت و بلعیده می‌شود ⇒ تابع false می‌دهد ⇒
+  حلقهٔ S-00 آن را «اپ نصب نیست» تفسیر می‌کند و `err` می‌دهد. [Inference]
+
+■ make_report_json(directory, title, ref_doctype, add_total_row=1)
+  پیش‌فرض: `${4:-1}`
+  مراحل: mkdir -p → touch __init__.py → write_utf8 JSON
+  ثابت‌های همیشگی JSON: creation=modified=NOW_TS، disabled=0، doctype="Report"،
+  is_standard="Yes"، module="Iran Transport"، owner/modified_by="Administrator"،
+  prepared_report=0، report_type="Script Report"، name==report_name==title،
+  و آرایهٔ ۹ نقشی ثابت.
+  نُه فراخوانی و مقدار add_total_row:
+      trade_transport_1405  / "Trade Transport 1405"  / Trade Case     / 0
+      freight_report        / "Freight Report"        / Transport Case / 1
+      customs_report        / "Customs Report"        / Transport Case / 1
+      tonnage_report        / "Tonnage Report"        / Transport Case / 1
+      profit_report         / "Profit Report"         / Trade Case     / 1
+      stalled_cases_report  / "Stalled Cases Report"  / Transport Case / 0
+      payments_report       / "Payments Report"       / Transport Case / 1
+      daily_summary_report  / "Daily Summary Report"  / Transport Case / 1
+      packing_report        / "Packing Report"        / Transport Case / 1
+  اطمینان: Fact | [source: S-05]
+
+────────────────────────────────────────────────────────────────────────────────
+7.2  upsert_fields — پایتون زمان نصب                               [source: S-01]
+────────────────────────────────────────────────────────────────────────────────
+
+■ upsert_fields(path, definitions, before_field=None) -> None
+  پیش‌شرط: `path` باید JSON معتبر DocType باشد؛ در غیر این صورت استثنا و
+           به‌خاطر set -e کل اسکریپت می‌ایستد.
+  مراحل دقیق:
+      1) load JSON
+      2) fields = doc.setdefault("fields", [])
+         field_order = doc.setdefault("field_order", [])
+      3) ساخت ایندکس by_name از fieldname های موجود
+      4) changed = False ; names = [spec["fieldname"] ...]
+      5) حلقه روی definitions:
+             اگر موجود → old=dict(current) ; current.update(spec)
+                        ; if current != old: changed = True
+             وگرنه     → fields.append(dict(spec)) ; changed = True
+      6) old_order = list(field_order)
+         field_order[:] = [f for f in field_order if f not in names]
+      7) index = field_order.index(before_field) اگر موجود، وگرنه len(field_order)
+      8) درج نام‌ها به ترتیب در index+offset
+      9) if old_order != field_order: changed = True
+     10) if changed: doc["modified"] = now
+     11) dump با ensure_ascii=False, indent=1
+     12) چاپ "<basename>: updated | already correct"
+  ویژگی کلیدی: **idempotent واقعی** — اجرای دوباره روی فایل بدون تغییر، modified
+  را دست نمی‌زند. [Fact]
+  دو فراخوانی:
+    (الف) trade_case.json ، before_field="section_docs" ، ۶ spec:
+          section_invoice        Section Break  "اطلاعات فاکتور و پیش‌فاکتور"
+          sales_invoice_number   Data           in_standard_filter=1
+          sales_invoice_date     Date
+          purchase_invoice_number Data          in_standard_filter=1
+          purchase_invoice_date  Date
+          sales_amount_usd       Currency       options="USD"
+    (ب) transport_case.json ، before_field="section_waybill" ، ۶ spec:
+          section_invoice_refs   Section Break  collapsible=1  "فاکتور و پکینگ"
+          sales_invoice_number   Data           read_only=1
+          sales_invoice_date     Date           read_only=1
+          purchase_invoice_number Data          read_only=1
+          purchase_invoice_date  Date           read_only=1
+          packing_date           Date           in_standard_filter=1
+
+────────────────────────────────────────────────────────────────────────────────
+7.3  sync_trade_invoice_fields                                     [source: S-02]
+────────────────────────────────────────────────────────────────────────────────
+
+■ sync_trade_invoice_fields(doc, method=None) -> None
+  محل: transport_ir/iran_transport/phase8/events.py، سطح ماژول، public (هوک)
+  پیش‌شرط (گارد ورودی):
+      if not doc.name or not frappe.db.exists("DocType", "Transport Case"):
+          return
+  مراحل:
+      1) values = {field: doc.get(field) for field in INVOICE_FIELDS}
+      2) names = frappe.get_all("Transport Case",
+             filters={"trade_case": doc.name,
+                      "workflow_state": ["not in", ["Cancelled", "Rejected"]]},
+             pluck="name")
+      3) for name in names:
+             frappe.db.set_value("Transport Case", name, values,
+                                 update_modified=False)
+  کامنت داخل docstring: هدف، مستقل‌کردن خروجی پکینگ/عملیاتی از خواندن DB داخل
+  قالب‌های Jinja، و به‌روزرسانی رکوردهای از پیش ساخته‌شده.
+  side effect: نوشتن مستقیم DB بدون اجرای validate/هوک فرزند و **بدون** تغییر
+               `modified` — که مستقیماً مانع خراب شدن Stalled Cases Report می‌شود.
+               [Inference قوی، چون آن گزارش دقیقاً بر `modified` تکیه دارد.]
+  ورودی خالی: لیست خالی ⇒ حلقه اجرا نمی‌شود، بدون خطا.
+  خطا: try/except ندارد؛ خطای DB بالا می‌رود و کل ذخیرهٔ Trade Case rollback می‌شود.
+  اطمینان: Fact (رفتار rollback: Inference)
+
+────────────────────────────────────────────────────────────────────────────────
+7.4  هلپرهای Jinja                                                 [source: S-03]
+────────────────────────────────────────────────────────────────────────────────
+
+docstring ماژول صریحاً می‌گوید تبدیل جلالی عمداً به ir_jalali واگذار شده و این
+ماژول الگوریتم تقویمی دوم ندارد؛ و `normalize_persian` تنها منبع حقیقتِ تطبیق
+فازی فارسی (Smart Sync Rule G1) است و لایهٔ اکسل اختصاصی آن را reuse می‌کند.
+
+■ fa_digits(value) -> str
+  None → ""، سپس join رقم‌به‌رقم با `_FA_DIGITS[int(char)] if char.isdigit()`.
+  مرزی: چون ارقام فارسی هم `isdigit()` True دارند و `int("۵")==5` است، تابع
+  idempotent است. [Inference]
+
+■ normalize_persian(value) -> str   ← حیاتی
+  ترتیب دقیق عملیات:
+      1) None → ""
+      2) حذف تک‌تک ۶ کاراکتر zero-width
+      3) "ي"→"ی" ، "ى"→"ی" ، "ك"→"ک" ، "ﻙ"→"ک" ، "ة"→"ه" ، حذف "\u0640"
+      4) حذف دیاکریتیک با _DIACRITICS.sub("")
+      5) translate(_TO_LATIN_DIGITS)
+      6) "\u00a0"→" " سپس re.sub(r"\s+"," ") و strip()
+  قرارداد تست: normalize_persian("  ي\u200cك  ") == "یک"   [S-21]
+
+■ to_persian_digits(value) -> str
+  None → ""؛ فقط translate(_TO_PERSIAN_DIGITS). مصرف داخلی ندارد.
+
+■ fa_money(value, currency=None) -> str
+  try: fmt_money(flt(value), precision=2, currency=currency)
+  except Exception: f"{flt(value):,.2f}"
+  سپس fa_digits. ورودی None ⇒ flt(None)=0 ⇒ "۰٫۰۰". [Inference]
+
+■ fa_date(value) -> str
+  falsy → ""؛ وگرنه fa_digits(format_jalali(value)).
+  قرارداد تست: fa_date("2025-03-21") == "۱۴۰۴/۰۱/۰۱"   [S-21]
+
+■ latin_jalali_date(value) -> str
+  falsy → ""؛ وگرنه format_jalali(value) بدون فارسی‌سازی رقم.
+  docstring: «Jalali date with Latin digits, suitable for Excel cells.»
+  ← این تفکیک عمدی است تا اکسل عدد/تاریخ را خراب نکند.
+
+■ fa_datetime(value) -> str
+  falsy → ""؛ try get_datetime، except → fa_digits(value)؛
+  موفق → f"{fa_date(dt)} {fa_digits(dt.strftime('%H:%M'))}"
+
+────────────────────────────────────────────────────────────────────────────────
+7.5  ادغام hooks.py (inline، بدون تابع)                            [source: S-04]
+────────────────────────────────────────────────────────────────────────────────
+
+مراحل:
+  1) خواندن hooks.py
+  2) re.sub حذف بلوک بین `# --- PHASE8_HOOKS_START ---` و
+     `# --- PHASE8_HOOKS_END ---` با flags=re.DOTALL   ← ضامن idempotency
+  3) append بلوک جدید پس از rstrip
+  4) ast.parse برای اعتبارسنجی سینتکس
+منطق دفاعی داخل بلوک تزریقی:
+  • required_apps نرمال می‌شود (list/tuple/scalar) و "ir_jalali" اضافه می‌شود.
+  • jinja به dict امن تبدیل و پنج متد بدون تکرار append می‌شوند:
+        fa_digits, fa_money, fa_date, fa_datetime, normalize_persian
+    و `filters` موجود حفظ می‌شود.
+  • doc_events["Trade Case"]["on_update"] در سه حالت مدیریت می‌شود:
+        خالی        → مقداردهی مستقیم
+        list/tuple  → append در صورت نبود
+        رشتهٔ تکی    → تبدیل به لیست دوتایی
+    ← این تنها مکانیزمی است که تضمین می‌کند هوک‌های فازهای ۴..۷ کشته نشوند. [Fact]
+
+────────────────────────────────────────────────────────────────────────────────
+7.6  Trade Transport 1405 — گزارش ۲۶ ستونه                         [source: S-06]
+────────────────────────────────────────────────────────────────────────────────
+
+■ _column(fieldname, label, fieldtype=None, width=100, options=None) -> dict
+  همیشه fieldname/label/width؛ fieldtype و options فقط اگر truthy.
+
+■ get_columns() -> list[dict]   (docstring: "Return the exact 26-column layout")
+  ترتیب دقیق و لیبل فارسی:
+     1 sales_date  تاریخ فروش              Date      105
+     2 sales_inv   ش.فاکتور فروش                     120
+     3 customer    مشتری                             150
+     4 item_s      نوع کالا                          130
+     5 plan_s      تناژ اصلی فروش           Float     105
+     6 usd         مبلغ دلار                Currency  120  options=USD
+     7 rial        مبلغ ریال                Currency  130
+     8 ship_s      تناژ خروجی فروش          Float     110
+     9 cship_s     جمع کل خارج‌شده فروش      Float     135
+    10 sur_s       مازاد بارگیری فروش        Float     120
+    11 csur_s      جمع کل مازاد فروش        Float     130
+    12 rem_s       باقیمانده فروش           Float     110
+    13 crem_s      جمع کل باقیمانده فروش     Float     140
+    14 pur_date    تاریخ خرید               Date      105
+    15 pur_inv     ش.فاکتور خرید                      120
+    16 supplier    تأمین‌کننده                        150
+    17 item_p      نوع کالا (خرید)                    130
+    18 plan_p      تناژ اصلی خرید            Float     105
+    19 pur_amt     مبلغ خرید                Currency  130
+    20 ship_p      تناژ خروجی خرید           Float     110
+    21 cship_p     جمع کل خارج‌شده خرید       Float     135
+    22 sur_p       مازاد بارگیری خرید        Float     120
+    23 csur_p      جمع کل مازاد خرید         Float     130
+    24 rem_p       باقیمانده خرید           Float     110
+    25 crem_p      جمع کل باقیمانده خرید      Float     140
+    26 status      وضعیت                             140
+
+■ _get_trade_rows(filters) -> list[frappe._dict]
+  conditions = ["1 = 1"] ; values = {}
+  فیلترهای اختیاری: company, from_date (>=), to_date (<=), case_type, name
+  SELECT شامل: name, case_type, posting_date, customer, supplier_factory, item,
+  cargo_description, planned_tonnage, sales_amount_usd, sales_amount,
+  purchase_amount, sales_invoice_number, sales_invoice_date,
+  purchase_invoice_number, purchase_invoice_date, workflow_state
+  ORDER BY posting_date, name
+  امنیت: نام ستون‌ها literal و مقادیر پارامتریک %(x)s ⇒ بدون SQL injection [Inference]
+
+■ _get_shipment_totals(trade_names) -> dict[str, float]
+  docstring: "actual_tonnage is authoritative. net_weight/1000 is used only as
+  fallback for a Transport Case whose actual_tonnage has not been populated."
+  ورودی خالی → {}  (شاخهٔ مرزی صریح)
+  SQL حساس:
+      sum(case when ifnull(actual_tonnage,0) > 0 then actual_tonnage
+               else ifnull(net_weight,0)/1000 end) as shipped
+  با فیلتر workflow_state not in ('Cancelled','Rejected') و group by trade_case.
+
+■ _build_report_rows(trade_rows, shipment_totals) -> list[list]   ← قلب فایل
+  docstring صریح: پروندهٔ «فروش» فقط به جزئیات و جمع‌های فروش، و پروندهٔ «خرید»
+  فقط به جزئیات و جمع‌های خرید کمک می‌کند.
+  شش انباشتگر مستقل:
+      cumulative_sales_shipped / _surplus / _remaining
+      cumulative_purchase_shipped / _surplus / _remaining
+  برای هر ردیف:
+      planned  = flt(row.planned_tonnage)
+      shipped  = flt(shipment_totals.get(row.name))
+      surplus  = max(0.0, shipped - planned)
+      remaining= max(0.0, planned - shipped)
+      item     = row.item or row.cargo_description or ""
+      case_type= (row.case_type or "").strip()
+      is_sale     = case_type == "فروش"
+      is_purchase = case_type == "خرید"
+  انباشت فقط داخل شاخهٔ متناظر.
+  ساختار خروجی هر ردیف (۲۶ عنصر): جزئیات فروش با الگوی `X if is_sale else None`،
+  جمع‌های فروش **همیشه** مقدار، سپس جزئیات خرید با `X if is_purchase else None`،
+  جمع‌های خرید همیشه مقدار، و در پایان `_(row.workflow_state or "Draft")`.
+  ⚠ دام اولویت عملگر [Fact]:
+      row.sales_invoice_date or row.posting_date if is_sale else None
+    در پایتون به `(a or b) if is_sale else None` تفسیر می‌شود؛ نتیجه درست است
+    ولی خوانایی خطرناک و مستعد رگرسیون در ویرایش‌های آینده.
+  حالت مرزی: case_type خارج از دو مقدار (مثلاً "" یا None) ⇒ همهٔ جزئیات None و
+  فقط جمع‌ها تکرار می‌شوند.
+
+■ execute(filters=None) -> (columns, data)
+  filters = frappe._dict(filters or {}) → _get_trade_rows → _get_shipment_totals
+  با [row.name for row in trade_rows] → return get_columns(), _build_report_rows(...)
+
+■ trade_transport_1405.js
+  کلید: frappe.query_reports["Trade Transport 1405"]
+  فیلترها: company (Link Company با default از frappe.defaults)، from_date،
+           to_date، case_type (Select "\nخرید\nفروش")
+  onload: سه دکمه زیر گروه __("خروجی"):
+      1) "خروجی اکسل مالی ۱۴۰۵"      → download_1405
+      2) "خروجی اختصاصی (قالب کارفرما)" → export_financial_custom
+      3) "خروجی خرید (قالب کارفرما)"   → export_purchase_custom
+  دو دکمهٔ اول همهٔ فیلترها را با حلقه روی report.filters و `filter.get_value()`
+  داخل try/catch جمع می‌کنند؛ catch خالی با کامنت
+  "// Ignore filters that are not initialized."  [Fact]
+
+────────────────────────────────────────────────────────────────────────────────
+7.7  Freight Report                                                [source: S-07]
+────────────────────────────────────────────────────────────────────────────────
+
+■ execute(filters=None) -> (columns, data)  — دو مسیر کاملاً مجزا
+  شرط پایهٔ همیشگی: ifnull(t.workflow_state,'') not in ('Cancelled','Rejected')
+  فیلترها: from_date, to_date, carrier
+  period_expression    = PERIOD_EXPRESSIONS.get(filters.get("period"))
+  dimension_expression = DIMENSION_EXPRESSIONS.get(filters.get("group_by"))
+
+  مسیر A (تجمیعی) اگر هر یک truthy باشد:
+      select_parts/group_parts/columns به‌صورت پویا ساخته می‌شوند؛
+      dimension با ifnull(nullif(expr,''),'—') پوشش داده می‌شود؛
+      سه سنجه ثابت: sum(freight_cost)، sum(actual_tonnage)، count(*)
+      order by همان group_parts
+  مسیر B (جزئیات) در غیر این صورت: ۱۰ ستون
+      name, posting_date, waybill_number, driver, carrier, customer,
+      supplier_factory, border, actual_tonnage, freight_cost
+      order by posting_date desc, name desc
+
+  نکتهٔ طراحی [Inference]: JS مقدار پیش‌فرض "جزئیات" را می‌فرستد ولی این مقدار
+  کلید PERIOD_EXPRESSIONS نیست ⇒ .get() برابر None ⇒ مسیر B. یعنی «جزئیات» عملاً
+  یک no-op عمدی است.
+  نکتهٔ نحوی [Fact]: `%%Y` به‌کار رفته چون رشته از `%`-formatting پایتون عبور می‌کند.
+
+■ freight_report.js
+  فیلترها: from_date, to_date, carrier (Link Carrier), period
+           (Select "\nجزئیات\nروزانه\nماهانه\nسالانه" default "جزئیات"),
+           group_by (Select "\nراننده\nباربری\nمشتری\nکارخانه")
+  سه دکمه زیر "خروجی":
+      "صورتحساب باربری Excel"       → export_carrier_statement
+      "لیست تسویه کرایه (اختصاصی)"  → export_freight_custom
+      "خروجی ارسال/بارنامه (اختصاصی)" → export_dispatch_custom
+
+────────────────────────────────────────────────────────────────────────────────
+7.8  Customs Report                                                [source: S-08]
+────────────────────────────────────────────────────────────────────────────────
+
+■ execute(filters=None)
+  مسیر تجمیعی (اگر group_by در DIMENSIONS):
+      label با ifnull(nullif(expr,''),'—')
+      sum(customs_cost), sum(clearance_cost),
+      sum(customs_cost + clearance_cost) as total_cost, count(*)
+      order by total_cost desc
+  مسیر جزئیات: ۸ ستون (name, posting_date, border, declaration_number,
+      customs_broker, driver, customs_cost, clearance_cost)
+      order by posting_date desc, modified desc
+■ customs_report.js — سه فیلتر + دکمهٔ "صورتحساب گمرک Excel" → export_customs_statement
+
+────────────────────────────────────────────────────────────────────────────────
+7.9  Tonnage Report                                                [source: S-09]
+────────────────────────────────────────────────────────────────────────────────
+
+■ execute(filters=None)
+  actual_expression مشترک (همان CASE اولویت actual/net_weight) که در هر دو مسیر
+  به‌صورت رشته تزریق می‌شود.
+  تجمیعی: planned=sum(planned_tonnage) ، actual=sum(actual_expression) ،
+          variance = sum(actual) - sum(planned) ، count ، order by actual desc
+  جزئیات: ۹ ستون شامل trade_case و net_weight (kg)
+■ tonnage_report.js — سه فیلتر، **بدون** دکمهٔ خروجی. [Fact]
+
+────────────────────────────────────────────────────────────────────────────────
+7.10 Profit Report                                                 [source: S-10]
+────────────────────────────────────────────────────────────────────────────────
+
+■ TRANSPORT_COST_JOIN (ثابت رشته‌ای)
+      left join ( select trade_case, count(*) as transport_count,
+                  sum(ifnull(freight_cost,0)+ifnull(customs_cost,0)
+                      +ifnull(clearance_cost,0)+ifnull(other_cost,0))
+                      as transport_cost
+                  from `tabTransport Case`
+                  where ifnull(workflow_state,'') not in ('Cancelled','Rejected')
+                  group by trade_case ) costs on costs.trade_case = tc.name
+
+■ _effective_operational_cost() -> str
+      case when ifnull(costs.transport_count,0) > 0
+                then ifnull(costs.transport_cost,0)
+           else ifnull(tc.freight_cost,0) + ifnull(tc.customs_cost,0)
+                + ifnull(tc.clearance_cost,0) end
+  معنا: اگر حتی یک Transport Case فعال وجود داشته باشد، هزینه‌های سطح Trade Case
+  کاملاً نادیده گرفته می‌شوند ⇒ ضدِ دوباره‌شماری. [Inference قوی از ساختار]
+  ⚠ توجه: در شاخهٔ fallback، `other_cost` وجود ندارد (فقط سه هزینه) در حالی که در
+  ساب‌کوئری چهار هزینه جمع می‌شود. [Fact — عدم تقارن عمدی یا سهوی: Unknown]
+
+■ execute(filters=None)
+  تجمیعی (group_by ∈ {مشتری، کارخانه}): sales, purchase, total_cost, profit, count
+      profit = sum(sales) - sum(purchase) - sum(initial_costs + operational)
+      order by profit desc
+  جزئیات: ۹ ستون با total_cost و profit محاسبه‌شده در SQL
+■ profit_report.js — سه فیلتر.
+
+────────────────────────────────────────────────────────────────────────────────
+7.11 Stalled Cases Report                                          [source: S-11]
+────────────────────────────────────────────────────────────────────────────────
+
+■ execute(filters=None)
+  minimum_hours = int(filters.get("minimum_hours") or 24)
+  critical_hours = int(filters.get("critical_hours") or 48)
+  if critical_hours < minimum_hours: critical_hours = minimum_hours   ← نرمال‌سازی
+  SQL با پارامتر موقعیتی تکی (%s):
+      workflow_state not in ('Completed','Cancelled','Rejected')
+      and timestampdiff(hour, modified, now()) >= %s
+      order by stopped_hours desc, modified asc
+  طبقه‌بندی در پایتون:
+      >= critical → _("بحرانی") ; >= minimum → _("تأخیر") ; else → _("عادی")
+  ⚠ شاخهٔ «عادی» غیرقابل دسترسی است چون SQL از قبل >= minimum فیلتر کرده. [Fact]
+  ورودی نامعتبر: int("abc") → ValueError هندل‌نشده. [Fact]
+■ stalled_cases_report.js — دو فیلتر Int با reqd:1 و default 24 و 48.
+
+────────────────────────────────────────────────────────────────────────────────
+7.12 Payments Report                                               [source: S-12]
+────────────────────────────────────────────────────────────────────────────────
+
+■ _mask_sheba(value) -> str
+      value = value or ""
+      if len(value) <= 8: return value
+      return f"{value[:4]}****{value[-4:]}"
+  ⇒ سیاست حریم خصوصی مالی. مرزی: طول ≤ ۸ بدون ماسک برمی‌گردد. [Fact]
+
+■ execute(filters=None)
+  شرط ثابت: p.parenttype = 'Transport Case'
+  inner join `tabTransport Case` c on c.name = p.parent
+  فیلترها: payment_date >= / <= ، payment_type
+  order by payment_date desc, parent desc, idx
+  ستون‌ها: parent, driver, waybill_number, payment_type, amount, payment_date,
+           reference_no, paid_by, sheba(ماسک‌شده)
+■ payments_report.js — سه فیلتر؛ payment_type با گزینه‌های
+  "\nپیش کرایه\nکرایه\nگمرک\nترخیص\nسایر"
+  ⇒ **دامنهٔ رسمی نوع پرداخت در کل پروژه**؛ لایهٔ اکسل اختصاصی از «کرایه» و
+    «پیش کرایه» استفاده می‌کند. [Fact]
+
+────────────────────────────────────────────────────────────────────────────────
+7.13 Daily Summary Report                                          [source: S-13]
+────────────────────────────────────────────────────────────────────────────────
+
+■ execute(filters=None)
+  period_name = filters.get("period") or "روزانه"
+  period_expression = PERIODS.get(period_name, PERIODS["روزانه"])   ← fallback بی‌صدا
+  شرط پایه workflow + فیلتر تاریخ
+  سنجه‌ها: count(*) ، sum(actual_tonnage) ،
+           sum(if(workflow_state='Completed',1,0)) ،
+           sum(freight+customs+clearance+other)
+  order by period_label desc
+■ daily_summary_report.js — period با reqd:1 و default "روزانه"
+  (توجه: options بدون "\n" ابتدایی، یعنی مقدار خالی مجاز نیست). [Fact]
+
+────────────────────────────────────────────────────────────────────────────────
+7.14 Packing Report                                                [source: S-14]
+────────────────────────────────────────────────────────────────────────────────
+
+■ execute(filters=None)
+  فیلتر تاریخ روی coalesce(t.packing_date, t.posting_date) برای هر دو سمت
+  فیلترهای border و customer
+  left join `tabTrade Case` tc on tc.name = t.trade_case
+  fallback دولایه برای هر دو شمارهٔ فاکتور:
+      coalesce(nullif(t.sales_invoice_number,''), tc.sales_invoice_number)
+      coalesce(nullif(t.purchase_invoice_number,''), tc.purchase_invoice_number)
+  order by coalesce(packing_date, posting_date) desc, t.modified desc
+  ۱۴ ستون؛ `cargo_description` در SELECT هست ولی ستون مستقل ندارد و فقط در
+  `row.item or row.cargo_description` مصرف می‌شود. [Fact]
+■ packing_report.js — چهار فیلتر (from_date, to_date, border Link, customer Link)
+  دو دکمه: "خروجی اکسل پکینگ" → export_packing ،
+           "پکینگ لیست گمرکی (اختصاصی)" → export_packing_custom
+
+────────────────────────────────────────────────────────────────────────────────
+7.15 Print Formats (heredoc پایتون)                                [source: S-15]
+────────────────────────────────────────────────────────────────────────────────
+
+پیش از تولید:
+    rm -rf "${PRINT_ROOT}/waybill_print" "${PRINT_ROOT}/weighbridge_print"
+با کامنت: "Remove only known source artifacts introduced by the rejected version."
+
+چهار فرمت (directory, name, doc_type):
+  trade_case_proforma        → "Trade Case Proforma"        → Trade Case
+  transport_packing_list     → "Transport Packing List"     → Transport Case
+  transport_waybill_print    → "Transport Waybill Print"    → Transport Waybill
+  transport_weighbridge_print→ "Transport Weighbridge Print"→ Transport Weighbridge
+
+فیلدهای ثابت هر JSON:
+  align_labels_right=1, custom_format=1, disabled=0, doctype="Print Format",
+  font="Default", modified_by/owner="Administrator", module="Iran Transport",
+  print_format_builder=0, print_format_type="Jinja", raw_printing=0, standard="Yes"
+
+بدنهٔ HTML: `<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;...">`
+و جدول دوستونی با border. فیلترهای مصرف‌شده: fa_digits، fa_money، fa_date،
+fa_datetime — که همگی از طریق hooks در Jinja ثبت شده‌اند.
+نکتهٔ محتوایی [Fact]: در «لیست پکینگ» دو نام واقعی درج شده:
+    «ثبت: خانم عنایتی | تأیید: خانم افراشته‌پور»
+
+────────────────────────────────────────────────────────────────────────────────
+7.16 api/report_excel.py                                           [source: S-16]
+────────────────────────────────────────────────────────────────────────────────
+
+■ _guard(allowed_roles) -> None
+      current_roles = set(frappe.get_roles())
+      if not (current_roles & set(allowed_roles)):
+          frappe.throw(_("دسترسی به این عملیات مجاز نیست."), frappe.PermissionError)
+  ⇒ دروازهٔ امنیتی همهٔ endpointها و همچنین re-export شده به لایهٔ اختصاصی.
+
+■ _new_workbook(title) -> (Workbook, Worksheet)
+  import تنبل؛ worksheet.title = title[:31] (سقف اکسل)؛ rightToLeft = True.
+
+■ _style_header(worksheet, headers, row=1) -> None
+  Font(bold=True, color="000000") ، PatternFill(solid, fgColor="D9EAF7") ،
+  Alignment(center, center, wrap_text=True)
+
+■ _autosize(worksheet, minimum=11, maximum=35) -> None
+  عرض = max(len(str(value)) + 2) کلمپ‌شده بین ۱۱ و ۳۵.
+
+■ _finalize_table(worksheet, header_row, last_row, last_column) -> None
+  freeze_panes روی (header_row+1, 1) ؛
+  auto_filter.ref = f"A{header_row}:{col_letter}{last_row}" فقط اگر last_row>=header_row ؛
+  alignment روی **همهٔ** سلول‌های شیت ؛ سپس _autosize.
+
+■ _send(workbook, filename) -> None
+  BytesIO → frappe.response["type"]="binary" ، ["filename"] ، ["filecontent"] ،
+  ["display_content_as"]="attachment"
+
+■ _report_value(row, index, column)
+  dict → row.get(column["fieldname"]) ؛ list → row[index] if index < len(row) else None
+  ⇒ پشتیبانی از هر دو شکل خروجی گزارش.
+
+■ _write_report_table(worksheet, columns, data, header_row=1, jalali_dates=True)
+  هدر → حلقهٔ دوگانه → تبدیل Date/Datetime به latin_jalali_date در صورت فعال بودن
+  → number_format: Currency='#,##0.00' ، Float='#,##0.000' → _finalize_table
+
+■ @whitelist download_1405(company=None, from_date=None, to_date=None, case_type=None)
+  گارد FINANCE_ROLES → import تنبل execute → workbook "گزارش 1405"
+  تیترها: A1="گزارش خرید، فروش و حمل ۱۴۰۵" ، F1="دلار" ، G1="ریال"
+  جدول از header_row=2
+  ردیف جمع = len(data)+3 با A="جمع کل" Bold
+  منطق حساس:
+      if column["fieldname"] in RUNNING_TOTAL_FIELDS:
+          total_value = values[-1] if values else 0
+      else:
+          total_value = sum(values)
+  (values فقط مقادیر غیر None/"" را شامل می‌شود)
+  سلول جمع: Bold + PatternFill "FFF2CC" + number_format بر اساس نوع
+  فایل: trade_transport_1405.xlsx
+
+■ @whitelist export_packing(from_date, to_date, border, customer)
+  گارد OPERATIONS → packing_report.execute → header_row=1 → packing.xlsx
+
+■ @whitelist export_carrier_statement(carrier, from_date, to_date)
+  گارد FINANCE ؛ SQL مستقیم روی tabTransport Case ؛
+  هدرها: پرونده، بارنامه، راننده، باربری، مرز، تناژ، کرایه، تاریخ
+  انباشت total_tonnage / total_freight ؛ ردیف جمع در ستون‌های ۵/۶/۷ با Bold
+  فایل: carrier_statement.xlsx
+
+■ @whitelist export_customs_statement(from_date, to_date)
+  گارد FINANCE ؛ ۹ هدر (ستون نهم «جمع» در پایتون محاسبه می‌شود)
+  ردیف جمع در ستون‌های ۶/۷/۸/۹ ؛ فایل: customs_statement.xlsx
+
+■ @whitelist export_proforma(name)
+  گارد OPERATIONS **و** doc.check_permission("read")  ← کنترل دولایه
+  ۱۵ جفت (برچسب, مقدار) به‌صورت عمودی با ستون اول Bold
+  امن‌سازی نام فایل: re.sub(r"[^A-Za-z0-9_.-]+", "_", doc.name)
+  ⇒ جلوگیری از تزریق در هدر Content-Disposition [Inference]
+  فایل: proforma_<safe>.xlsx
+
+■ @whitelist download_proforma_template()
+  گارد OPERATIONS ؛ ۱۱ سربرگ به این ترتیب دقیق (قرارداد ورودی import):
+      مشتری | تأمین‌کننده | نوع کالا | تناژ اصلی | مبلغ دلار | مبلغ ریال |
+      تاریخ فروش | ش.فاکتور فروش | تاریخ خرید | ش.فاکتور خرید | نوع پرونده
+  freeze_panes="A2" ؛ فایل: proforma_template.xlsx
+
+■ @whitelist import_proforma_excel(file_url)
+  docstring: «fail-fast و تراکنشی؛ ردیف نامعتبر باعث rollback کل درخواست می‌شود
+  و از import نیمه‌کاره جلوگیری می‌کند.»
+  زنجیرهٔ اعتبارسنجی به ترتیب دقیق:
+      1) _guard(OPERATIONS_ROLES)
+      2) frappe.has_permission("Trade Case","create") وگرنه PermissionError
+      3) file_url = (file_url or "").strip() ؛ خالی → throw
+      4) file_url.lower().split("?",1)[0].endswith(".xlsx") وگرنه throw
+      5) frappe.db.get_value("File", {"file_url": file_url}, "name") ؛ نبود → throw
+      6) file_doc.check_permission("read")
+      7) flt(file_doc.file_size) > MAX_IMPORT_FILE_SIZE → throw
+      8) content = file_doc.get_content() ؛ اگر str → encode("latin-1")
+      9) openpyxl.load_workbook(BytesIO, read_only=True, data_only=True) در try ؛
+         except → throw _("فایل Excel معتبر نیست: {0}")
+     10) worksheet.max_row - 1 > MAX_IMPORT_ROWS → throw
+     11) حلقه از min_row=2 با values_only=True:
+             ردیف خالی → continue
+             values = list(row) + [None] * max(0, 11 - len(row))   ← padding
+     12) نگاشت ثابت ستون‌ها:
+             [0]customer [1]supplier [2]cargo_description [3]planned_tonnage
+             [4]sales_amount_usd [5]sales_amount [6]sales_invoice_date
+             [7]sales_invoice_number [8]purchase_invoice_date
+             [9]purchase_invoice_number [10]case_type (پیش‌فرض "خرید")
+     13) سه اعتبارسنجی با پیام «ردیف {n}: ...»:
+             case_type ∈ ("خرید","فروش") / customer الزامی / planned_tonnage > 0
+     14) doc = frappe.new_doc("Trade Case")
+         doc.case_title = f"{customer} - {cargo_description or case_type}"
+         ... doc.insert()
+     15) اگر created خالی → throw ؛ وگرنه return {"created": [...], "count": n}
+  ⇒ هیچ frappe.db.commit() دستی وجود ندارد.
+
+────────────────────────────────────────────────────────────────────────────────
+7.17 UI فرم و لیست Trade Case                                      [source: S-17]
+────────────────────────────────────────────────────────────────────────────────
+
+■ trade_case.js
+      frappe.ui.form.on("Trade Case", { refresh: function (frm) {
+          if (frm.is_new()) return;
+          frm.add_custom_button("خروجی Excel پیش‌فاکتور", ... export_proforma?name=...
+              , __("خروجی"));
+      }});
+
+■ trade_case_list.js  — IIFE با "use strict"
+      • حفظ previous_onload و فراخوانی آن اگر تابع باشد ⇒ زنجیره‌پذیری با فازهای دیگر
+      • گارد listview.__phase8_excel_buttons برای جلوگیری از دکمهٔ تکراری
+      • دکمهٔ "دانلود قالب پیش‌فاکتور" → download_proforma_template  (گروه "اکسل")
+      • دکمهٔ "ورود پیش‌فاکتور از Excel" → Dialog با یک فیلد Attach (reqd:1)
+        و primary_action که disable_primary_action می‌کند، frappe.call با
+        freeze/freeze_message، در callback نمایش alert سبز ۷ ثانیه‌ای با
+        __("{0} پرونده تجاری ایجاد شد.") و listview.refresh()، و در always
+        enable_primary_action.
+      • در پایان: frappe.listview_settings["Trade Case"] = settings
+
+────────────────────────────────────────────────────────────────────────────────
+7.18 api/report_excel_custom.py — لایهٔ اکسل اختصاصی               [source: S-175]
+────────────────────────────────────────────────────────────────────────────────
+
+■ Staging قالب‌ها (بخش Bash قبل از تولید ماژول)
+      mkdir -p sites/<site>/private/files/excel_templates
+      TEMPLATE_SRC = SCRIPT_DIR/excel_client_files یا APP_ROOT/excel_client_files
+      cp -f template_*.xlsx و client_logo.png (با `|| true` ⇒ شکست کپی کشنده نیست)
+      اگر هیچ‌کدام نبود → warn (نه err)
+
+■ docstring ماژول — اولویت منابع
+      P0  قرارداد واقعی JSON اکسل: نام شیت، مختصات سلول، merge، ستون مخفی،
+          متن دقیق سربرگ، فرمول، دامنهٔ استایل
+      P1  فیلدهای واقعی Meta/DocType پروژه
+      P2  قوانین فرایندی پروژه
+      P3  alias/fuzzy — فقط برای تشخیص، هرگز برای بازنویسی متن مشتری و هرگز
+          برای حدس مقصد
+  و ده «قانون مطلق» شماره‌گذاری‌شده که مهم‌ترینشان:
+      1 متن ثابت مشتری هرگز «اصلاح املایی» نمی‌شود
+      4 قفل مختصات بر fuzzy مقدم است
+      5 ابهام ⇒ UNRESOLVED، نه حدس محتمل
+      6 فایل قالب اصلی هرگز بازنویسی نمی‌شود
+      7 export فقط copy / in-memory
+      8 import = Preview → Validate → Resolve → Commit
+      9 خطای یک ردیف ⇒ rollback کل import
+     10 ساخت رکورد عملیاتی فقط از Document API، هرگز SQL
+
+■ _norm(value) -> str            = normalize_persian(value).lower()
+■ _alias_keys(value) -> set[str] = کلید نرمال + معادل‌های **دوطرفهٔ** HEADER_ALIASES
+   (هم source→targets و هم target→source، سپس حذف مقادیر تهی)
+
+■ _template_dir() -> str         = frappe.get_site_path("private","files","excel_templates")
+■ _find_file(pattern) -> str|None
+   نبود دایرکتوری → None ؛ اولین فایل در sorted(listdir) که pattern در نامش باشد
+   و پسوند .xlsx داشته باشد.
+
+■ _has_field(doctype, fieldname) -> bool
+   fieldname خالی → False ؛ frappe.get_meta().get_field() در try/except → False
+   ⇒ گارد «هرگز fieldname اختراع نکن»
+■ _safe_fields(doctype, wanted) -> list[str]
+   فقط فیلدهای موجود (یا "name")؛ همیشه "name" را تضمین می‌کند.
+
+■ _resolve_link_smart(linked_doctype, value)
+   حلقه روی LINK_DISPLAY_PRIORITY با meta.has_field و frappe.db.get_value ؛
+   سپس meta.title_field ؛ هر Exception → بازگشت خود value.
+■ _resolve_link(doctype, value, search_field)
+   سمت import: اول frappe.db.exists(doctype, value) ⇒ همان ؛ وگرنه
+   frappe.db.get_value(doctype, {search_field: value}, "name")
+■ _resolve_link_columns(doctype, specs, rows)
+   فقط specهایی که source آن‌ها فیلد Link با options باشد ؛ کش (options, value)
+
+■ _transform_date(value, date_mode)
+   falsy → "" ؛ "gregorian" → getdate(value).strftime("%Y/%m/%d") در try ؛
+   وگرنه latin_jalali_date در try ؛ هر خطا → str(value)
+■ _transform_value(value, value_type, date_mode)
+   None/"" → None
+   Date → _transform_date ؛ Currency/Float → flt ؛ Int/Row → int(flt) در try ؛
+   **Identifier → str(value)**  ← حفظ صفر ابتدایی شبا/پلاک/موبایل/فاکتور
+   سایر → بدون تغییر
+
+■ _set_cell_value(ws, row_idx, col_idx, value) -> bool
+   MergedCell → یافتن رنج در بر گیرنده و نوشتن روی (min_row, min_col) ؛
+   اگر رنج پیدا نشد → False. سلول عادی → نوشتن مستقیم → True.
+■ safe_write_merged_aware(ws, coord, value) -> bool   ← نسخهٔ A1-محور
+
+■ _is_formula(value)             = isinstance(str) and startswith("=")
+■ _cell_has_formula(ws, r, c)    = MergedCell → False ؛ وگرنه _is_formula(cell.value)
+■ _shift_formula(formula, delta)
+   با _FORMULA_REF فقط ارجاعات نسبی را shift می‌کند؛ `$` مطلق دست‌نخورده می‌ماند.
+
+■ _protected_ranges(sheet_reg)   = {str(CellRange(ref)) for ref in protected_merges}
+■ _unmerge_data_area(ws, sheet_reg, start_row, total_row=None)
+   docstring: فقط merge های ناحیهٔ داده unmerge می‌شوند؛ تیتر، بلوک هدر، لوگو و
+   Total محافظت‌شده باقی می‌مانند و فایل روی دیسک هرگز دست نمی‌خورد.
+   سه شرط عبور: ref در protected / min_row < start_row / (total_row و min_row>=total_row)
+   خود unmerge در try/except pass.
+
+■ _copy_row_style(ws, source_row, target_row)
+   کپی `_style` (اگر has_style) و number_format ؛ MergedCell رد می‌شود ؛ try/except pass
+■ _clone_row_formulas(ws, sheet_reg, source_row, target_row)
+   اگر formula_patterns تعریف شده باشد: نوشتن pattern.format(row=target_row) و
+   **return زودهنگام** ؛ در غیر این صورت کلون فرمول‌های ردیف مبدأ با _shift_formula.
+
+■ _ensure_data_rows(ws, start_row, required_rows, total_row=None, sheet_reg=None)
+   required_rows <= 0 → بازگشت total_row
+   با total_row: available = total_row - start_row ؛ اگر کم بود extra محاسبه و
+   الگوریتم unmerge/insert/style+formula/re-merge/shift اجرا می‌شود (بند ۱۳.۶)
+   بدون total_row: فقط استایل و فرمول ردیف‌های جدید تا last_row ساخته می‌شود.
+
+■ _find_header_row(ws, sheet_reg, max_rows=30)
+   ساخت مجموعهٔ expected از _alias_keys همهٔ ستون‌ها ؛ اگر تهی بود → declared
+   تابع داخلی _score(row_idx) تعداد ستون‌های منطبق را می‌شمارد
+   اگر declared <= max_row و _score(declared) > 0 → همان declared
+   وگرنه بهترین امتیاز در بازهٔ 1..min(max_rows, max_row)
+■ find_header_row_fuzzy(ws, expected_headers, max_rows=30, min_match_ratio=0.6)
+   docstring: «Public fuzzy helper, detection only, kept for reuse and testing.»
+   اگر len(mapping) < len(expected)*0.6 → (header_row, {})
+   ⚠ در فایل فراخوانی نمی‌شود. [Fact]
+
+■ _build_column_mapping(ws, header_row, sheet_reg, log=None)
+   docstring: «Coordinate locked mapping: column index -> registry spec.»
+   mapping همیشه بر اساس حرف ستونِ رجیستری ساخته می‌شود؛ متن سربرگ فقط
+   confidence را تعیین می‌کند:
+       منطبق با alias  → "coordinate+exact" ، 1.0
+       پر ولی نامنطبق  → "coordinate"       ، 0.9
+       خالی            → "coordinate+empty" ، 0.8
+   status = "ok" اگر field وجود داشته باشد، وگرنه "unresolved" با error=note
+
+■ _clear_data_area(ws, sheet_reg, start_row, total_row=None)
+   فقط اگر clear_data_area ؛ last_row = total_row-1 یا ws.max_row ؛
+   MergedCell و سلول فرمول‌دار **پاک نمی‌شوند**.
+
+■ _fill_sheet(ws, sheet_reg, rows, log, allow_row_insert=True) -> dict
+   ترتیب دقیق:
+       date_mode → _find_header_row → start_row → total_row
+       → _build_column_mapping → _unmerge_data_area → _clear_data_area
+       → (اختیاری) _ensure_data_rows
+       → حلقهٔ offset×mapping با اولویت بررسی:
+             coord in protected_cells        → continue
+             _cell_has_formula               → log skip_protected_formula
+             not field                       → log skip_unresolved
+             field == "__row__"              → نوشتن offset+1
+             value = _transform_value(...)   ؛ None/"" → continue
+             _set_cell_value + log write
+       → _rewrite_sum_formulas → _fill_meta_cells
+   خروجی: {"header_row","start_row","total_row","last_data_row"}
+
+■ _rewrite_sum_formulas(ws, sheet_reg, start_row, last_data_row, total_row, log)
+   کامنت: «§13: the only authorized formula rewrite is the declared SUM extension.»
+   shift = total_row - declared_total (اگر هر دو موجود)
+   نوشتن f"=SUM({L}{start_row}:{L}{last_data_row})" و لاگ rewrite_sum
+
+■ _fill_meta_cells(ws, sheet_reg, rows, log)
+   فقط از rows[0] ؛ مقدار خالی → log skip_meta/unresolved ؛
+   متن = f"{prefix}{value}" و نوشتن با safe_write_merged_aware
+
+■ _apply_title(ws, sheet_reg, from_date, to_date, log)
+   فقط اگر title_cell ؛ value = to_date or from_date ؛ prefix + تاریخ
+
+■ _restore_hidden_columns(ws, sheet_reg)
+   ws.column_dimensions[letter].hidden = True
+
+■ _open_template(template_key) -> (reg, wb)
+   _find_file(pattern) ؛ نبود → throw فارسی با نام template_key
+   کامنت: «Read only. The workbook on disk is never saved back (§0 rule 6/7).»
+   openpyxl.load_workbook(path)  ← **بدون** data_only ⇒ فرمول‌ها حفظ می‌شوند
+   چک همهٔ required_sheets ؛ نبود → throw
+■ _get_sheet(wb, reg, sheet_name)
+   کامنت: «§15: never select a sheet by index while the required name exists.»
+   نبود نام → throw. هرگز wb.active.
+
+■ _rows_from_report(columns, data) -> list[dict]
+   dict → کپی ؛ list → نگاشت بر اساس fieldname با محافظت index
+
+■ _load_and_fill_report(template_key, columns, data, extra_sheets=None,
+                        from_date=None, to_date=None) -> Workbook
+   _open_template → SyncLog → _get_sheet → rightToLeft → _rows_from_report
+   → _apply_title → _fill_sheet → _restore_hidden_columns
+   → حلقهٔ extra_sheets (شیت‌های ثانویه با رجیستری خودشان)
+   → تزریق لوگو **فقط** اگر allow_logo_injection و شیت هیچ تصویری نداشته باشد و
+     فایل client_logo.png موجود باشد (width=120, height=60, anchor "B2")
+     ⚠ هر ۵ قالب allow_logo_injection=False ⇒ این شاخه عملاً مرده است [Fact]
+   → log.flush() → return wb
+
+■ _columns_from_specs(specs) -> list[dict]
+■ _fetch_rows(doctype, specs, filters, order_by) -> list[dict]
+   wanted از spec["source"] ؛ _safe_fields ؛ frappe.get_all با limit_page_length=0
+   افزودن "__row__" (۱-پایه) و "__name__" به هر ردیف
+■ _transport_filters(from_date=None, to_date=None, carrier=None, border=None)
+   پایه workflow_state not in [Cancelled, Rejected]
+   سه حالت تاریخ: between / >= / <=
+
+■ _attach_payment_details(rows)
+   کامنت: «§3.3 Transport Payment: account holder, bank, account, advance freight.»
+   نبود DocType → return
+   SQL با order by ifnull(payment_date,'1900-01-01') asc, idx asc
+   گروه‌بندی by_parent ؛ latest = entries[-1] برای paid_by/sheba/bank_name ؛
+   advance = مجموع amount هایی که payment_type.strip() == "پیش کرایه"
+■ _build_composite_identity(rows)
+   "-".join([border, customer or supplier_factory, item or cargo_description,
+             driver_name or driver])
+■ _fill_cargo_fallback(rows)
+   برای ردیف‌های بدون cargo_description که trade_case دارند، از Trade Case
+   مقدار item یا cargo_description گرفته می‌شود.
+■ _prepare_packing_rows(rows)
+   size = dimensions (فقط اگر _has_field) or thickness or None
+   delivery_border / driver / customer با _resolve_link_smart
+■ _t04_key(row)
+   dimensions or item or cargo_description or ""
+   کامنت: کلید SUMIFS باید در دو شیت یکسان باشد:
+   'پیش فاکتور خرید'!C  <->  'صورت بارگیری'!D
+■ _attach_waybill_numbers(rows)
+   نبود DocType → return ؛ کل SQL در try/except → return بی‌صدا ؛
+   order by modified asc و overwrite در dict ⇒ عملاً «آخرین بارنامه» برنده است
+■ _prefer_driver_display(rows)
+   اگر driver_name موجود بود، driver با آن جایگزین می‌شود.
+
+■ پنج EXPORT (همه @frappe.whitelist())
+  ┌────────────────────────────┬──────────┬────────────────────────────────────┐
+  │ تابع                        │ نقش      │ منبع داده / خروجی                  │
+  ├────────────────────────────┼──────────┼────────────────────────────────────┤
+  │ export_financial_custom     │ FINANCE  │ گزارش 1405 → financial_custom.xlsx │
+  │ (company,from,to,case_type, │          │ اگر name داده شود به filters اضافه │
+  │  name)                      │          │ می‌شود                              │
+  │ export_freight_custom       │ FINANCE  │ Transport+Payment →                │
+  │ (carrier,from,to)           │          │ freight_custom.xlsx                │
+  │ export_packing_custom       │ OPERATION│ packing_report → packing_custom    │
+  │ (from,to,border,customer,   │          │ فیلتر name **در حافظه** اعمال      │
+  │  name)                      │          │ می‌شود نه در SQL                    │
+  │ export_purchase_custom      │ FINANCE  │ Trade(case_type="خرید" سخت‌کد) +   │
+  │ (from,to,supplier)          │          │ Transport → purchase_custom.xlsx   │
+  │ export_dispatch_custom      │ OPERATION│ Transport+Waybill →                │
+  │ (from,to,border,carrier)    │          │ dispatch_custom.xlsx               │
+  └────────────────────────────┴──────────┴────────────────────────────────────┘
+  در export_purchase_custom پس از resolve لینک‌ها، `size_key` روی **هر دو**
+  دیتاست (invoice_rows و loading_rows) با _t04_key ست می‌شود تا رابطهٔ SUMIFS
+  برقرار بماند. [Fact]
+
+■ _file_bytes(file_url) -> bytes
+   خالی → throw «فایل مشخص نیست» ؛ پسوند .xlsx ؛ یافتن File ؛ check_permission ؛
+   سقف حجم → throw «حجم فایل زیاد است» ؛ encode latin-1 اگر str.
+   ⚠ بدون چک MAX_IMPORT_ROWS (آن به _import_rows منتقل شده).
+■ _to_date(val) — datetime→date ، date→خودش ، وگرنه getdate در try → None
+■ _pick_sheet(wb, sheet_name) — نام موجود → آن ؛ **وگرنه wb.active**
+■ _import_rows(ws, sheet_reg) -> list[dict]
+   header/start از رجیستری ؛ سقف MAX_IMPORT_ROWS → throw ؛
+   سلول فرمول‌دار → None ؛ کلید = field یا f"__col_{L}__" ؛
+   ردیف بدون هیچ مقدار → حذف ؛ هر ردیف "__source_row__" دارد
+■ _row_get(row, *keys) — اول تطابق مستقیم غیرخالی، بعد تطابق نرمال‌شده
+■ _preview_response(template_key, rows, issues, resolved) -> dict
+   {"mode":"preview","template_key":...,"total_rows":len(rows),
+    "ready":len(resolved),"issues":issues,"count":0,"created":[],
+    "sample":resolved[:10]}
+
+■ @whitelist import_purchase_custom(file_url, mode="preview")
+   1) _guard(OPERATIONS_ROLES) + has_permission("Trade Case","create")
+   2) load_workbook(data_only=True) + _pick_sheet("پیش فاکتور خرید")
+   3) _import_rows
+   4) متادیتای ثابت: D2=شماره فاکتور ، B2=تاریخ (_to_date) ، F2=فروشنده خام
+      supplier = _resolve_link("Supplier", supplier_raw, "supplier_name")
+   5) حلقهٔ اعتبارسنجی با پیام «ردیف {n}: ...»:
+        • نبود item و size_key → «نام کالا/سایز خالی است»
+        • tonnage <= 0        → «تناژ نامعتبر است»
+        • نبود invoice_number → «شماره فاکتور خرید در قالب خالی است»
+        • supplier_raw هست ولی resolve نشد → «فروشنده «{x}» در سیستم یافت نشد»
+        • duplicate guard روی {purchase_invoice_number, supplier_factory, item}
+          (فقط اگر _has_field تأیید کند) → «رکورد تکراری با پرونده {name}»
+   6) mode != "commit" → _preview_response
+   7) commit با issues → throw «خطا در ورود اطلاعات:\n» + "\n".join(issues)
+   8) ساخت رکورد:
+        case_type="خرید" ؛ case_title=f"{supplier or 'Import'} - {item or 'خرید'}"
+        نوشتن مشروط dimensions / delivery_type / purchase_invoice_number /
+        purchase_invoice_date با _has_field
+        posting_date = purchase_invoice_date or frappe.utils.today()
+   9) کامنت: «No manual commit. Frappe rolls back automatically if we throw.»
+  10) return {"mode":"commit","count":len(created),"created":created,"issues":[]}
+
+■ @whitelist import_freight_custom(file_url, mode="preview")
+   1) _guard(FINANCE_ROLES) + has_permission("Transport Payment","create")
+   2) load_workbook(data_only=True) + _pick_sheet("Sheet1") + _import_rows
+   3) برای هر ردیف: freight, composite, account_holder, invoice
+        • freight <= 0 → issue
+        • تطبیق والد اولویت ۱: sales_invoice_number (فقط اگر _has_field)
+          match_method = "sales_invoice_number"
+        • اولویت ۲: composite به‌عنوان waybill_number با limit_page_length=2 و
+          پذیرش فقط اگر len(candidates)==1 → match_method="composite_waybill"
+          کامنت: «§5: never split blindly, the raw composite is kept for review.»
+        • نبود والد → issue با نمایش شناسهٔ خام
+        • duplicate guard روی {parenttype, parent, payment_type:"کرایه", amount}
+   4) preview یا throw
+   5) commit: parent_doc = frappe.get_doc("Transport Case", parent)
+        payment_row = {"payment_type":"کرایه","amount":...,"payment_date":today()}
+        نوشتن مشروط paid_by / bank_name / sheba(str) / notes با meta.has_field
+        notes = f"ورود از اکسل اختصاصی | شناسه خام: {raw_identity or '-'}"
+        parent_doc.append("payments", payment_row) ؛ parent_doc.save()
+   6) return با count=len(set(touched))
+
+────────────────────────────────────────────────────────────────────────────────
+7.19 سه patch جاوااسکریپت (heredoc پایتون)                        [source: S-175]
+────────────────────────────────────────────────────────────────────────────────
+
+■ patch 1 — trade_case_list.js
+   مارکر: `// PHASE8_CUSTOM_EXCEL_BUTTONS`
+   لنگر: `src.rfind('}, __("اکسل"));')`  ← **آخرین** وقوع
+   افزوده: تابع `phase8_custom_import(label, method)` که Dialog می‌سازد،
+   ابتدا mode="preview" را صدا می‌زند، سپس با `frappe.confirm` پیام
+   __("ردیف قابل ثبت: {0} از {1}") + فهرست issues با `<br>` نمایش می‌دهد و در
+   تأیید، mode="commit" را اجرا می‌کند.
+   به‌علاوه ۵ دکمهٔ خروجی و ۲ دکمهٔ ورودی، همه زیر گروه __("اکسل اختصاصی").
+
+■ patch 2 — trade_case.js
+   مارکر: `// PHASE8_CUSTOM_EXPORT_BUTTON`
+   لنگر: رشتهٔ دقیق `}, __("خروجی"));\n\t}\n});`  ← حساس به tab/newline
+   افزوده: دو دکمه — «خروجی اختصاصی (قالب کارفرما)» با
+   `?name=` + encodeURIComponent(frm.doc.name) و «خروجی خرید (قالب کارفرما)».
+
+■ patch 3 — transport_case_list.js
+   مارکر: `// PHASE8_CUSTOM_TRANSPORT_EXCEL_BUTTONS`
+   اگر فایل نبود می‌سازد، اگر بود append می‌کند (بدون نیاز به لنگر).
+   محتوا: IIFE با حفظ previous_onload، گارد `__phase8_custom_excel_buttons`،
+   سه دکمهٔ خروجی (dispatch/freight/packing) و یک دکمهٔ ورود کرایه با همان
+   الگوی preview→confirm→commit و پیام __("{0} پرداخت ثبت شد").
+
+────────────────────────────────────────────────────────────────────────────────
+7.20 ترجمه، Workspace، setup، verify، pre-migrate           [S-18..S-22]
+────────────────────────────────────────────────────────────────────────────────
+
+■ S-18 — merge fixture ترجمه
+   کلید یکتا: (language, source_text) ؛ نام پیش‌فرض f"fa-phase8-{i:02d}" ؛
+   مرتب‌سازی نهایی بر (language, source_text) ؛ ۱۳ ترجمه:
+       Trade Transport 1405        → گزارش جامع مالی        ← نگاشت کلیدی
+       Freight Report              → گزارش کرایه
+       Customs Report              → گزارش گمرک و ترخیص
+       Tonnage Report              → گزارش تناژ
+       Profit Report               → گزارش سود
+       Stalled Cases Report        → پرونده‌های متوقف‌شده
+       Payments Report             → گزارش پرداخت‌ها
+       Daily Summary Report        → خلاصه روزانه، ماهانه و سالانه
+       Packing Report              → گزارش پکینگ
+       Trade Case Proforma         → پیش‌فاکتور پرونده تجاری
+       Transport Packing List      → لیست پکینگ حمل
+       Transport Waybill Print     → چاپ بارنامه حمل
+       Transport Weighbridge Print → چاپ رسید باسکول
+
+■ S-19 — patch شش Workspace
+   کامنت صریح فارسی در ابتدای heredoc:
+       «Workspace Link.link_type فقط: DocType | Page | Report —
+        لینک URL مجاز نیست (ValidationError)»
+   standard_all (۸ مورد): کرایه، گمرک، تناژ، سود، متوقف، پرداخت‌ها، خلاصه، پکینگ
+   custom_all  (۱ مورد): («گزارش جامع مالی», "Trade Transport 1405")
+   نگاشت دقیق per workspace:
+       ceo_dashboard      : همهٔ ۸ + custom
+       finance            : [0,1,3,5,6] + custom
+       iran_transport     : [0,1,2,4,6,7] + custom
+       transport_purchase : [0,2,4,7] + custom
+       transport_sales    : [0,2,4,7] + custom
+       customs            : [1,2,4] + **بدون** custom
+   پاکسازی قبل از افزودن: حذف Card Break با یکی از سه لیبل قدیمی، حذف Link های
+   Report فاز ۸، حذف هر Link با link_type=="URL"، حذف هر Link حاوی
+   "report_excel_custom".
+   سپس دو Card Break با link_count و لینک‌های is_query_report=1 اضافه می‌شوند و
+   `content` با بلوک‌های `p8-reports-std` / `p8-reports-custom` (col=4) بازنویسی
+   و به JSON-string تبدیل می‌شود (separators=(",",":")).
+   Workspace غایب → چاپ «workspace optional, skipped» و ادامه.
+
+■ S-20 — setup_phase8.py
+   _cleanup_rejected_phase8_artifacts()
+       برای ۸ نام snake_case و ۲ نام Print Format، فقط اگر
+       module == "Iran Transport" باشد delete_doc(force=True) در try/except pass
+   _backfill_invoice_fields()
+       UPDATE `tabTransport Case` t INNER JOIN `tabTrade Case` tc
+       SET ۴ فیلد WHERE ifnull(t.trade_case,'') != ''
+       ⚠ بدون فیلتر workflow_state (برخلاف هوک) → بخش ۱۷ مورد ۳
+   _sync_workspace(folder)
+       خواندن JSON از frappe.get_app_path ؛ اگر Workspace در DB نبود → return ؛
+       doc.content = data["content"] ؛ doc.set("links", []) ؛
+       فیلتر link_type ∈ (DocType, Page, Report) ؛ append ؛
+       flags.ignore_permissions / ignore_links ؛ save(ignore_permissions=True)
+   setup_phase8(commit=True) -> True
+       frappe.flags.in_patch = True → cleanup → backfill → حلقهٔ ۶ workspace
+       → db.commit() اختیاری → frappe.clear_cache() → print → return True
+
+■ S-21 — verify_phase8.py
+   تابع داخلی check(name, condition, detail="") با چاپ ✅ PASS / ❌ FAIL
+   ۱۱ گروه بررسی (فهرست کامل در بخش ۹ و ۱۸):
+     openpyxl / بازرسی سورس jinja_helpers (وجود import ir_jalali و نبود `def _g2j`)
+     / سه assertion هلپر / ۱۰ فیلد + options USD / ۹ گزارش (وجود، ref_doctype،
+     report_name، execute({})، fieldname) / تست ترکیبی ۱۴۰۵ با دو رکورد ساختگی و
+     ۱۰ assertion ایندکسی / ۴ Print Format + نبود ۲ نام منسوخ / ۷ متد استاندارد +
+     چهار بازرسی متنی روی import_proforma_excel / بلوک custom در try/except با
+     چاپ «⚠️ Custom Excel module check skipped» / هوک‌ها / Workspaceها
+   پایان: چاپ شمارش، و در صورت وجود failed → frappe.throw با " | ".join
+   بازگشتی: {"passed": n, "failed": m}
+
+   دادهٔ ساختگی تست ۱۴۰۵ [Fact]:
+       SALE-TEST     : فروش  ، planned=10 ، shipped=8   (از دیکشنری)
+       PURCHASE-TEST : خرید  ، planned=20 ، shipped=25
+   و ادعاها:
+       sale_row[4]==10 و sale_row[7]==8
+       sale_row[17] is None و sale_row[19] is None
+       purchase_row[17]==20 و purchase_row[19]==25
+       purchase_row[4] is None و purchase_row[7] is None
+       sale_row[12]==2        (باقیماندهٔ فروش تجمعی)
+       purchase_row[22]==5    (مازاد خرید تجمعی)
+       purchase_row[8]==8 و purchase_row[20]==25
+
+■ S-22 — pre-migrate structural checks
+   جمع‌آوری فایل‌های پایتون (custom فقط اگر exists) + همهٔ report/*.py
+   برای هر report JSON:
+       expected_directory = re.sub(r"[^a-z0-9]+","_", report_name.lower()).strip("_")
+       اگر != نام پوشه → error
+       اگر data["name"] != data["report_name"] → error
+   ast.parse همهٔ فایل‌های پایتون + hooks.py
+   چک ۴ Print Format (name و doc_type)
+   چک fixture (list بودن، dict بودن هر عضو، وجود doctype و name)
+   در صورت هر خطا: چاپ فهرست + sys.exit(1)  ← به‌خاطر set -e کل اسکریپت می‌ایستد
+
+■ S-23 / S-24 / S-END
+   bench build --app transport_ir
+   bench --site migrate ؛ clear-cache
+   bench execute setup_phase8 ؛ clear-cache
+   bench execute verify_phase8
+   git config مشروط (`git config user.email >/dev/null 2>&1 || git config ...`)
+   git add -A ؛ git commit -m "phase 8 final: independent 1405 finance report,
+   secure Excel, RTL prints, grouped reports and golden-rules custom Excel sync"
+   || warn "nothing to commit"
+   heredoc FINAL: خلاصهٔ دو کارت Workspace، جدول ۵ قالب، محل دقیق دکمه‌ها
+   (List تجاری / List حمل / Form تجاری / داخل خود گزارش‌ها)، توضیح چرایی نبود
+   خروجی API در Workspace («Workspace نمی‌تواند link_type=URL داشته باشد»)،
+   فهرست قوانین طلایی اعمال‌شده، و چک‌لیست ۶ مرحله‌ای مرورگر.
+
+
+################################################################################
+# 8. جریان اجرای اصلی
+################################################################################
+
+1. نقطهٔ شروع
+   اجرای مستقیم اسکریپت. `set -euo pipefail` باعث می‌شود هر دستور ناموفق، هر
+   متغیر تعریف‌نشده و هر شکست در pipe، اجرا را متوقف کند.
+
+2. عملیات اولیه
+   export انکودینگ‌ها، محاسبهٔ SCRIPT_DIR با
+   `cd "$(dirname "${BASH_SOURCE[0]}")" && pwd`، تعریف شش مسیر، تولید NOW_TS،
+   تعریف رنگ‌ها و شش تابع کمکی.
+
+3. فراخوانی‌های داخلی به ترتیب
+   S-00 گیت → S-0B وابستگی → S-01 مدل داده → S-02/S-03 ماژول‌های پایتون →
+   S-04 hooks → S-05..S-14 گزارش‌ها → S-15 پرینت‌ها → S-16/S-17 اکسل و UI →
+   S-175 لایهٔ اختصاصی → S-18/S-19 ترجمه و Workspace → S-20/S-21 setup و verify
+   → S-22 دروازهٔ فایل‌محور → S-23 تعامل با DB → S-24 گیت.
+
+4. تغییر state یا داده
+   دیسک: ~۳۵ فایل. DB: فیلدها، ۹ Report، ۴ Print Format، ۱۳ Translation،
+   لینک‌های ۶ Workspace، backfill چهار فیلد روی همهٔ Transport Caseها.
+   حافظه: انباشتگرهای گزارش، entries لاگ، created/touched در import.
+
+5. شرط‌ها و شاخه‌ها
+   بیش از ۳۰ شاخهٔ تصمیم‌گیری که در بخش ۹ فهرست شده‌اند.
+
+6. خروجی نهایی
+   verify با «🎉 Phase 8 final checks passed» و commit موفق، سپس heredoc DONE.
+
+7. مسیرهای خطا
+   • هر `err` → exit 1
+   • هر دستور ناموفق (set -e) → exit
+   • `sys.exit(1)` در S-22
+   • `frappe.throw` در verify → خروج ناموفق `bench execute` → exit
+   • استثناهای نرم (فقط warn): bench روشن، openpyxl موجود، قالب‌ها غایب،
+     commit خالی
+
+نقطهٔ ورود از این فایل **قابل تعیین است**: اجرای مستقیم شل‌اسکریپت.
+
+
+################################################################################
+# 9. مسیرهای شرطی و حالت‌های مختلف
+################################################################################
+
+┌──────────────────────────────────┬────────────────────────────────┬──────────┐
+│ حالت                              │ رفتار واقعی                     │ منبع     │
+├──────────────────────────────────┼────────────────────────────────┼──────────┤
+│ bench/سایت/اپ/hooks غایب          │ err + exit 1                   │ S-00     │
+│ JSON فاز ۵/۶ غایب                 │ err "Phase 5/6 missing"        │ S-00     │
+│ اپ الزامی نصب نیست                │ err با نام اپ                   │ S-00     │
+│ bench از قبل روشن                 │ warn و ادامه                    │ S-00     │
+│ redis_cache.conf غایب             │ پورت پیش‌فرض 13000              │ S-00     │
+│ redis پس از ۶۰ تلاش آماده نشد     │ err + ارجاع به لاگ tmp          │ S-00     │
+│ DocType count != 1                │ err "Required DocType missing" │ S-00     │
+│ test_jalali شکست بخورد            │ set -e → exit                  │ S-00     │
+│ iconv نصب نیست                    │ چک UTF-8 skip بی‌صدا            │ write_utf8│
+│ openpyxl در requirements هست      │ warn، بدون تکرار                │ S-0B     │
+│ فیلد از قبل موجود و یکسان         │ modified دست‌نخورده             │ S-01     │
+│ before_field موجود نیست           │ درج در انتهای field_order      │ S-01     │
+│ بلوک hooks از قبل هست             │ حذف با regex و بازنویسی        │ S-04     │
+│ on_update قبلاً رشتهٔ تکی بود      │ تبدیل به لیست دوتایی           │ S-04     │
+│ excel_client_files غایب           │ warn؛ export ها زمان اجرا throw│ S-175    │
+│ Workspace JSON غایب               │ "workspace optional, skipped"  │ S-19     │
+│ Workspace در DB نیست              │ _sync_workspace return بی‌صدا   │ S-20     │
+│ filters خالی {} به execute        │ همهٔ گزارش‌ها اجرا می‌شوند       │ S-06..14 │
+│ case_type نامعتبر در ۱۴۰۵         │ جزئیات None، فقط جمع‌ها تکرار   │ S-06     │
+│ trade_names خالی                  │ {} بدون کوئری                  │ S-06     │
+│ period == "جزئیات"                │ .get() → None → مسیر جزئیات    │ S-07     │
+│ period نامعتبر در daily           │ سقوط بی‌صدا به "روزانه"         │ S-13     │
+│ minimum_hours غیرعددی             │ ValueError هندل‌نشده            │ S-11     │
+│ critical < minimum                │ critical = minimum             │ S-11     │
+│ شبا با طول ≤ 8                    │ بدون ماسک برمی‌گردد             │ S-12     │
+│ نقش کاربر مجاز نیست               │ PermissionError فارسی          │ _guard   │
+│ فایل غیر xlsx                     │ throw "فقط فایل XLSX مجاز است."│ import ها│
+│ file_url خالی                     │ throw فارسی                    │ import ها│
+│ File در DB نیست                   │ throw "فایل در سیستم پیدا نشد."│ import ها│
+│ حجم > 10MB                        │ throw فارسی                    │ import ها│
+│ workbook خراب                     │ throw "فایل Excel معتبر نیست"  │ S-16     │
+│ ردیف > 2000                       │ throw با عدد سقف               │ import ها│
+│ ردیف کاملاً خالی                   │ skip بی‌صدا                     │ import ها│
+│ هیچ ردیف معتبر (استاندارد)        │ throw «هیچ ردیف قابل ورودی...»  │ S-16     │
+│ هیچ ردیف معتبر (custom preview)   │ preview با ready=0 بدون throw  │ S-175    │
+│ issues غیرخالی در commit          │ throw چندخطی → rollback کامل   │ S-175    │
+│ قالب xlsx یافت نشد                │ throw فارسی با template_key    │ S-175    │
+│ شیت الزامی غایب                   │ throw فارسی                    │ S-175    │
+│ شیت نام‌دار در import نبود          │ سقوط به wb.active              │ S-175    │
+│ سلول مقصد فرمول دارد              │ skip + log skip_protected      │ S-175    │
+│ ستون بدون field در رجیستری        │ skip + log skip_unresolved     │ S-175    │
+│ مقدار تبدیل‌شده None/""            │ سلول دست‌نخورده                 │ S-175    │
+│ سلول مقصد MergedCell              │ نوشتن روی بالا-چپ رنج          │ S-175    │
+│ رنج merge پیدا نشد                │ بازگشت False (نوشتن نمی‌شود)    │ S-175    │
+│ بیش از یک کاندید در freight       │ ردیف رد می‌شود (UNRESOLVED)     │ S-175    │
+│ رکورد تکراری                      │ issue با نام رکورد موجود       │ S-175    │
+│ خطای logger در flush              │ بلعیده می‌شود                   │ S-175    │
+│ خطای unmerge/merge                │ try/except pass                │ S-175    │
+│ خطای delete_doc در cleanup        │ try/except pass                │ S-20     │
+│ git commit بدون تغییر             │ warn "nothing to commit"       │ S-24     │
+└──────────────────────────────────┴────────────────────────────────┴──────────┘
+
+
+################################################################################
+# 10. قراردادهای ورودی و خروجی
+################################################################################
+
+10.1 قالب ایمپورت استاندارد (خروجی download_proforma_template)
+     ردیف ۱ سربرگ، داده از ردیف ۲.
+       A مشتری                (اجباری)
+       B تأمین‌کننده           (اختیاری)
+       C نوع کالا             (اختیاری، در case_title استفاده می‌شود)
+       D تناژ اصلی            (اجباری، باید > 0)
+       E مبلغ دلار            (اختیاری)
+       F مبلغ ریال            (اختیاری)
+       G تاریخ فروش           (اختیاری)
+       H ش.فاکتور فروش        (اختیاری)
+       I تاریخ خرید           (اختیاری)
+       J ش.فاکتور خرید        (اختیاری)
+       K نوع پرونده           (اختیاری، پیش‌فرض "خرید"، دامنه {خرید، فروش})
+     ردیف کوتاه‌تر از ۱۱ ستون با None پر می‌شود.
+     خروجی موفق: {"created": ["...", ...], "count": n}
+     قالب خطا: frappe.throw با «ردیف {n}: <پیام فارسی>»
+
+10.2 قرارداد Preview لایهٔ اختصاصی
+     {"mode":"preview", "template_key":"template_0X_...", "total_rows":int,
+      "ready":int, "issues":[str,...], "count":0, "created":[],
+      "sample":[dict × حداکثر ۱۰]}
+
+10.3 قرارداد Commit لایهٔ اختصاصی
+     {"mode":"commit", "count":int, "created":[str,...], "issues":[]}
+
+10.4 قرارداد پنج قالب کارفرما (TEMPLATE_REGISTRY) — بازتولید کامل
+
+  ── T01 financial ──────────────────────────────────────────────────────────
+     template_key   : template_01_financial
+     pattern        : template_01
+     source_file    : «- 1405 گزارش خرید و فروش.xlsx»
+     sheet          : «گزارش 1405»
+     rtl            : True
+     header_row     : 1     child_header_row: 2     data_start_row: 3
+     total_row      : None  clear_data_area : True
+     hidden_columns : ("I","J","K","M","U","V","W","Y")
+     protected_merges: ("F1:G1", "B1:B2", "A1:A2")
+     date_mode      : jalali        allow_logo_injection: False
+     ستون‌ها A..Z (۲۶ ستون) با همان fieldname های گزارش ۱۴۰۵:
+       A تاریخ فروش/sales_date/Date
+       B ش.فاکتور فروش/sales_inv/Identifier
+       C مشتری/customer/Data
+       D نوع کالا/item_s/Data
+       E تناژ اصلی/plan_s/Float
+       F مبلغ [child «دلار»]/usd/Currency
+       G مبلغ [child «ریال»]/rial/Currency
+       H "تناژ خروجی\n فروش"/ship_s/Float
+       I "جمع کل \nخارج شده فروش"/cship_s/Float
+       J "مازاد\n بارگیری فروش"/sur_s/Float
+       K "جمع کل \nمازاد بارگیری فروش"/csur_s/Float
+       L باقیمانده فروش/rem_s/Float
+       M "جمع کل\n باقیمانده فروش"/crem_s/Float
+       N تاریخ خرید/pur_date/Date
+       O ش.فاکتور خرید/pur_inv/Identifier
+       P «تامین کننده»/supplier/Data      ← املای کارفرما، بدون همزه
+       Q نوع کالا/item_p/Data
+       R "تناژ\n اصلی"/plan_p/Float
+       S مبلغ/pur_amt/Currency
+       T "تناژ \nخروجی خرید"/ship_p/Float
+       U "جمع کل \nخارج شده خرید"/cship_p/Float
+       V "مازاد\n بارگیری خرید"/sur_p/Float
+       W "جمع کل \nمازاد بارگیری خرید"/csur_p/Float
+       X باقیمانده خرید/rem_p/Float
+       Y "جمع کل\n باقیمانده خرید"/crem_p/Float
+       Z وضعیت/status/Data
+
+  ── T02 freight ────────────────────────────────────────────────────────────
+     source_file : «خام لیست کرایه.xlsx»    sheet: Sheet1    rtl: True
+     header_row 2 / data_start_row 3 / total_row None
+     title_cell "A1" با title_prefix " "    protected_merges ("A1:O1",)
+     date_mode jalali
+     A ردیف/__row__/Row
+     B نام صاحب حساب/account_holder/Data
+       note: «account holder, NOT automatically the driver»
+     C شماره حساب/account_no/Identifier
+       note: «raw account value, never assumed to be Sheba»
+     D «بانک » (با فاصلهٔ انتهایی)/bank_name/Data
+     E وزن/weight/Float
+     F کل هرتن/**None**/Float      ← UNRESOLVED، فیلد تأییدشده ندارد
+     G « کرایه»/freight_cost/Currency   ← فرمول قالب محافظت می‌شود
+     H «هزنیه تخلیه»/**None**/Currency  ← غلط املایی کارفرما عیناً حفظ
+     I «هزنیه بارگیری»/**None**/Currency ← غلط املایی کارفرما عیناً حفظ
+     J کل کرایه/**None**/Currency       ← فرمول محافظت‌شده
+     K پیش کرایه/advance_freight/Currency
+     L مانده/**None**/Currency          ← فرمول محافظت‌شده
+     M «مرز-صاحب بار-نوع بار-نام راننده»/composite_identity/Data
+     N مبدا بارگیری/origin/Data
+     O « پیش فاکتور فروش»/sales_invoice_number/Identifier
+     formula_patterns:
+         G = "=F{row}*E{row}"
+         J = "=I{row}+G{row}"
+         L = "=J{row}-K{row}"
+
+  ── T03 packing ────────────────────────────────────────────────────────────
+     source_file : «فرم پکینگ (1).xlsx»   sheet: Sheet1
+     rtl : **False**  ← فرم LTR باقی می‌ماند
+     header_row 7 / data_start_row 10 / total_row 11
+     protected_merges (۱۳ رنج):
+        B2:J3, P7:X7, C7:C9, B5:J5, G7:G9, E7:E9, I7:I9, H7:H9, F7:F9,
+        J7:J9, D7:D9, B7:B9, B4:J4, B6:J6
+     date_mode : gregorian ("%Y/%m/%d")   allow_logo_injection: False
+     meta_cells:
+        B4 prefix "INVOICE NUMBER: " → sales_invoice_number (Identifier)
+        B5 prefix "Data:"            → packing_date (Date)
+        B6 prefix "Buyer: Mr "       → customer (Data)
+     total_label_cell "C11"   sum_columns {"F": "F11"}
+     B Row/__row__            C Description/item
+     D Size/size   note: «dimensions اول، thickness فقط fallback اعلامی»
+     E Branch/qty  note: «Branch = qty/شاخه، صراحتاً NOT «مرز»»
+     F Net Weight/actual_tonnage/Float
+     G Delivery B./delivery_border  note: «هرگز sales invoice نیست»
+     H Driver's name/driver         I Car tag/plate_number/Identifier
+     J Phone number/driver_mobile/Identifier
+
+  ── T04 purchase ───────────────────────────────────────────────────────────
+     source_file : «خام خرید.xlsx»   sheet: «پیش فاکتور خرید»
+     required_sheets: («فروشنده», «معرفی کالا», «پیش فاکتور خرید», «صورت بارگیری»)
+     rtl True / header_row 3 / data_start_row 4
+     protected_merges ("A1:K1",)   protected_cells ("I2",)
+     meta_cells: B2→purchase_invoice_date، D2→purchase_invoice_number،
+                 F2→supplier_factory
+     A ردیف/__row__   B نام کالا/item
+     C سایز/size_key  note: «سلول معیار SUMIFS، باید با 'صورت بارگیری'!D برابر باشد»
+     D تناژ/planned_tonnage/Float
+     E واحد وزن/**None**   note: «فیلد واحد تأییدشده نداریم → UNRESOLVED»
+     F فی واحد/**None**    note: «قیمت واحد، صراحتاً NOT purchase_amount»
+     G نوع ارز/**None**    note: «فیلد ارز روی Trade Case نداریم → UNRESOLVED»
+     H تحویل/delivery_type
+     I مقدار حمل شده/**None**  note: «SUMIFS محافظت‌شده»
+     J مانده/**None**          K ارزش کالای مانده/**None**
+     formula_patterns:
+       I = =IF(D{row}<>"",SUMIFS('صورت بارگیری'!$E$3:$E$1048576,
+                'صورت بارگیری'!$D$3:$D$1048576,C{row}),"")
+       J = =IF(D{row}<>"",D{row}-I{row},"")
+       K = =IF(D{row}<>"",J{row}*F{row},"")
+     extra_sheets.loading:
+       sheet «صورت بارگیری» / rtl True / header_row 2 / data_start_row 3
+       protected_merges ("A1:K1",)  protected_cells ("A1",)
+       A ردیف   B «پگینگ»/**None** (املای کارفرما، معنا نامشخص)
+       C تاریخ بارگیری/loading_date/Date
+       D کالا/size_key  ← کلید SUMIFS
+       E وزن خالص/actual_tonnage/Float   F مقصد/destination
+       G ش. کامیون/plate_number/Identifier   H نام راننده/driver
+       I شماره راننده/driver_mobile/Identifier   J خریدار/customer
+       K «ترخیصکار»/customs_broker
+
+  ── T05 dispatch ───────────────────────────────────────────────────────────
+     source_file : «فایل خام.xlsx»   sheet Sheet1   rtl True
+     header_row 3 / data_start_row 4 / total_row 10
+     protected_merges ("B2:L2",)   sum_columns {"E": "E10"}   date_mode jalali
+     B ردیف/__row__            C تاریخ بارگیری/loading_date/Date
+     D نوع بار/cargo_description  E وزن/actual_tonnage/Float
+     F مبدا/origin             G مقصد/destination
+     H ش. کامیون/plate_number/Identifier   I نام راننده/driver
+     J شماره راننده/driver_mobile/Identifier
+     K ترخیصکار/customs_broker  L باربری/carrier
+
+10.5 نگاشت نقش ↔ endpoint  [Fact]
+     FINANCE_ROLES   : download_1405، export_carrier_statement،
+                       export_customs_statement، export_financial_custom،
+                       export_freight_custom، export_purchase_custom،
+                       import_freight_custom
+     OPERATIONS_ROLES: export_packing، export_proforma،
+                       download_proforma_template، import_proforma_excel،
+                       export_packing_custom، export_dispatch_custom،
+                       import_purchase_custom
+
+10.6 محدودیت‌ها
+     حجم فایل ورودی ≤ 10 MiB ؛ تعداد ردیف ≤ 2000 ؛ فقط پسوند .xlsx ؛
+     عنوان شیت اکسل ≤ ۳۱ کاراکتر ؛ عرض ستون بین ۱۱ تا ۳۵.
+
+
+################################################################################
+# 11. منطق و قوانین قابل مشاهده
+################################################################################
+
+R01 [Fact] حذف پرونده‌های Cancelled/Rejected از همهٔ گزارش‌ها و تجمیع‌ها.
+    شرط: ifnull(workflow_state,'') not in (...)  |  نتیجه: عدم شمارش
+    منبع: S-06..S-14، S-16 (carrier/customs)، S-175 (_transport_filters)
+
+R02 [Fact] تناژ واقعی = actual_tonnage اگر > 0، وگرنه net_weight/1000.
+    منبع: S-06 _get_shipment_totals، S-09 actual_expression
+
+R03 [Fact] surplus = max(0, shipped-planned) و remaining = max(0, planned-shipped).
+    هیچ‌کدام منفی نمی‌شوند.  منبع: S-06
+
+R04 [Fact] سمت خرید و سمت فروش گزارش ۱۴۰۵ کاملاً مستقل‌اند؛ تفکیک با مقدار
+    دقیق فارسی case_type.  منبع: S-06 + تست S-21
+
+R05 [Fact] در گزارش سود، وجود حداقل یک Transport Case فعال ⇒ هزینه‌های سطح
+    Trade Case نادیده گرفته می‌شوند.  منبع: S-10
+
+R06 [Fact] profit = sales_amount - purchase_amount - (initial_costs + operational)
+
+R07 [Fact] پروندهٔ متوقف = غیر Completed/Cancelled/Rejected و ≥ minimum_hours؛
+    بحرانی از critical_hours؛ critical هرگز < minimum.  منبع: S-11
+
+R08 [Fact] شبا در گزارش پرداخت‌ها ماسک می‌شود مگر طولش ≤ ۸.  منبع: S-12
+
+R09 [Fact] تاریخ پکینگ = coalesce(packing_date, posting_date).  منبع: S-14
+
+R10 [Fact] شمارهٔ فاکتور پکینگ = coalesce(nullif(transport,''), trade).  منبع: S-14
+
+R11 [Fact] در ردیف «جمع کل» اکسل ۱۴۰۵، ستون‌های تجمعی «آخرین مقدار» می‌گیرند نه
+    مجموع.  منبع: S-16 download_1405 + RUNNING_TOTAL_FIELDS
+
+R12 [Fact] هر دو لایهٔ import تراکنشی‌اند و هیچ commit دستی ندارند؛ throw ⇒
+    rollback کامل توسط Frappe.  منبع: S-16، S-175
+
+R13 [Fact] هیچ فیلدی بدون تأیید Meta نوشته نمی‌شود (_has_field / meta.has_field).
+    منبع: S-175
+
+R14 [Fact] متن ثابت کارفرما هرگز اصلاح نمی‌شود؛ alias فقط در لایهٔ matching است.
+    منبع: S-175 HEADER_ALIASES + رجیستری
+
+R15 [Fact] قفل مختصات بر fuzzy مقدم است؛ mapping همیشه بر اساس حرف ستون است.
+    منبع: S-175 _build_column_mapping
+
+R16 [Fact] ابهام (بیش از یک کاندید) ⇒ رد ردیف، نه انتخاب حدسی.
+    منبع: S-175 import_freight_custom با limit_page_length=2
+
+R17 [Fact] فایل قالب روی دیسک هرگز ذخیره نمی‌شود؛ خروجی فقط in-memory است.
+    منبع: S-175 _open_template + _send
+
+R18 [Fact] Workspace فقط link_type ∈ {DocType, Page, Report} می‌پذیرد؛ URL
+    فعالانه حذف و در verify ممنوع اعلام می‌شود.  منبع: S-19، S-20، S-21
+
+R19 [Fact] «گزارش جامع مالی» = Trade Transport 1405 و فقط زیر کارت «اختصاصی»
+    است؛ Workspace گمرک کارت اختصاصی ندارد.  منبع: S-18، S-19
+
+R20 [Fact] پاکسازی artifactهای نسخهٔ رد شده فقط روی module=="Iran Transport".
+    منبع: S-20
+
+R21 [Inference] قرارداد نام‌گذاری «پوشهٔ snake_case ⟷ نام Title Case» با regex
+    در S-22 اجباری شده و یک قانون سطح پروژه است، نه سلیقهٔ فاز ۸.
+
+R22 [Fact] در قالب T03 هرگز لوگو تزریق نمی‌شود و جهت شیت LTR می‌ماند.
+    منبع: S-175 registry packing
+
+
+################################################################################
+# 12. Side Effects و تعاملات خارجی
+################################################################################
+
+• خواندن/نوشتن فایل    : بله، گسترده. ~۳۵ فایل تولیدی، append در requirements،
+                          کپی قالب‌ها، حذف دو پوشهٔ منسوخ.  [Fact]
+• درخواست شبکه         : هیچ HTTP خروجی وجود ندارد. فقط اتصال محلی به Redis و
+                          MariaDB. در JS فقط ناوبری به `/api/method/...` محلی. [Fact]
+• دسترسی دیتابیس       : db.count، get_all، db.sql (SELECT/UPDATE)، get_value،
+                          set_value، new_doc/insert، get_doc/save/append،
+                          delete_doc، db.commit.  [Fact]
+• تغییر متغیر سراسری   : frappe.response، frappe.flags.in_patch،
+                          frappe.listview_settings، frappe.query_reports،
+                          پرچم‌های __phase8_*.  [Fact]
+• تغییر state          : انباشتگرهای گزارش، SyncLog.entries، created/touched.
+• چاپ log              : stdout رنگی، frappe.logger("phase8_excel_sync")،
+                          /tmp/bench-start-phase8.log، /tmp/bench-start-phase8.pid.
+• ارسال event          : هوک doc_events["Trade Case"]["on_update"].  [Fact]
+• تغییر cache          : frappe.clear_cache() و دو بار bench clear-cache.  [Fact]
+• زمان‌سنج/غیرهم‌زمان   : حلقهٔ `for _i in $(seq 1 60); ... sleep 1` و
+                          `nohup bench start &`.  [Fact]
+• محیط                 : خواندن HOME، ست LANG/LC_ALL/PYTHONIOENCODING/SCRIPT_DIR،
+                          خواندن os.environ در heredocها (MOD، PKG، HOOKS، NOW_TS).
+• مواردی که وجود ندارند: ارسال ایمیل/SMS، صف/celery سفارشی، فراخوانی API شخص
+                          ثالث، دسترسی به storage ابری، رمزنگاری — هیچ‌کدام در
+                          این فایل مشاهده نشد.  [Fact از عدم مشاهده]
+
+
+################################################################################
+# 13. قطعه‌کدهای حیاتی
+################################################################################
+
+13.1 اولویت تناژ واقعی — پایهٔ همهٔ محاسبات حمل
+```sql
+sum(
+    case
+        when ifnull(actual_tonnage, 0) > 0
+            then actual_tonnage
+        else ifnull(net_weight, 0) / 1000
+    end
+) as shipped
+```
+چرا مهم: هر تغییری اینجا، همزمان ستون‌های ship/sur/rem/جمع‌های گزارش ۱۴۰۵،
+Tonnage Report و پنج خروجی اکسل را جابه‌جا می‌کند.
+
+13.2 استقلال کامل خرید و فروش
+```python
+is_sale = case_type == "فروش"
+is_purchase = case_type == "خرید"
+
+if is_sale:
+    cumulative_sales_shipped += shipped
+    cumulative_sales_surplus += surplus
+    cumulative_sales_remaining += remaining
+
+if is_purchase:
+    cumulative_purchase_shipped += shipped
+    cumulative_purchase_surplus += surplus
+    cumulative_purchase_remaining += remaining
+```
+چرا مهم: تضمین شمارهٔ ۳ هدر فایل و موضوع ۱۰ assertion در verify.
+
+13.3 جمع کل ستون‌های تجمعی در اکسل
+```python
+if column.get("fieldname") in RUNNING_TOTAL_FIELDS:
+    total_value = values[-1] if values else 0
+else:
+    total_value = sum(values)
+```
+چرا مهم: تنها جایی که «جمعِ جمع» عمداً انجام نمی‌شود؛ حذف آن باعث خطای مالی
+چندبرابری می‌شود.
+
+13.4 fallback هزینهٔ عملیاتی (ضد دوباره‌شماری)
+```sql
+case
+    when ifnull(costs.transport_count, 0) > 0
+        then ifnull(costs.transport_cost, 0)
+    else
+        ifnull(tc.freight_cost, 0)
+        + ifnull(tc.customs_cost, 0)
+        + ifnull(tc.clearance_cost, 0)
+end
+```
+چرا مهم: تنها محافظ در برابر شمارش دوبارهٔ هزینه در گزارش سود.
+
+13.5 نوشتن merge-aware
+```python
+def _set_cell_value(ws, row_idx, col_idx, value):
+    cell = ws.cell(row=row_idx, column=col_idx)
+
+    if isinstance(cell, MergedCell):
+        for merged_range in ws.merged_cells.ranges:
+            if (
+                merged_range.min_row <= row_idx <= merged_range.max_row
+                and merged_range.min_col <= col_idx <= merged_range.max_col
+            ):
+                ws.cell(
+                    row=merged_range.min_row,
+                    column=merged_range.min_col,
+                ).value = value
+                return True
+
+        return False
+
+    cell.value = value
+    return True
+```
+چرا مهم: openpyxl روی MergedCell استثنا می‌دهد؛ این تابع تنها مسیر امن نوشتن است.
+
+13.6 درج ردیف بدون خراب‌کردن merge و ردیف Total
+```python
+below = [
+    str(rng)
+    for rng in list(ws.merged_cells.ranges)
+    if rng.min_row >= total_row
+]
+
+for ref in below:
+    try:
+        ws.unmerge_cells(ref)
+    except Exception:
+        pass
+
+ws.insert_rows(total_row, amount=extra)
+
+for row_idx in range(total_row, total_row + extra):
+    _copy_row_style(ws, start_row, row_idx)
+    _clone_row_formulas(ws, sheet_reg, start_row, row_idx)
+
+for ref in below:
+    try:
+        rng = CellRange(ref)
+        rng.shift(row_shift=extra)
+        ws.merge_cells(str(rng))
+    except Exception:
+        pass
+
+total_row += extra
+```
+چرا مهم: کامنت خود کد می‌گوید openpyxl هنگام insert_rows رنج‌های merge را shift
+نمی‌کند؛ این بلوک تنها چیزی است که قالب کارفرما را از تخریب نجات می‌دهد.
+
+13.7 محافظت از فرمول و رعایت UNRESOLVED
+```python
+if _cell_has_formula(ws, row_idx, col_idx):
+    log.add(..., action="skip_protected_formula", status="protected")
+    continue
+
+field = spec.get("field")
+
+if not field:
+    log.add(..., action="skip_unresolved", status="unresolved", error=spec.get("note"))
+    continue
+```
+چرا مهم: پیاده‌سازی مستقیم قوانین «فرمول محافظت‌شده» و «ابهام ⇒ UNRESOLVED».
+
+13.8 قانون «ابهام ⇒ رد»
+```python
+candidates = frappe.get_all(
+    "Transport Case",
+    filters={
+        "workflow_state": ["not in", ["Cancelled", "Rejected"]],
+    },
+    or_filters=[
+        ["waybill_number", "=", str(composite).strip()],
+    ],
+    pluck="name",
+    limit_page_length=2,
+)
+
+if len(candidates) == 1:
+    parent_name = candidates[0]
+    match_method = "composite_waybill"
+```
+چرا مهم: `limit_page_length=2` عمدی است تا فقط تشخیص «یکتا یا نه» انجام شود.
+
+13.9 ادغام غیرمخرب hooks
+```python
+_p8_existing_on_update = _p8_trade_events.get("on_update")
+
+if not _p8_existing_on_update:
+    _p8_trade_events["on_update"] = _p8_invoice_handler
+elif isinstance(_p8_existing_on_update, (list, tuple)):
+    _p8_handlers = list(_p8_existing_on_update)
+    if _p8_invoice_handler not in _p8_handlers:
+        _p8_handlers.append(_p8_invoice_handler)
+    _p8_trade_events["on_update"] = _p8_handlers
+elif _p8_existing_on_update != _p8_invoice_handler:
+    _p8_trade_events["on_update"] = [
+        _p8_existing_on_update,
+        _p8_invoice_handler,
+    ]
+```
+چرا مهم: تنها محافظ هوک‌های فازهای قبلی در برابر بازنویسی.
+
+13.10 فیلتر امنیتی لینک Workspace
+```python
+if row.get("type") == "Link":
+    link_type = row.get("link_type") or "Report"
+    if link_type not in ("DocType", "Page", "Report"):
+        continue
+```
+چرا مهم: ریشهٔ ValidationError نسخهٔ قبلی؛ حذف آن یعنی شکست migrate.
+
+13.11 رابطهٔ SUMIFS بین دو شیت T04
+```
+"I": (
+    "=IF(D{row}<>\"\","
+    "SUMIFS('صورت بارگیری'!$E$3:$E$1048576,"
+    "'صورت بارگیری'!$D$3:$D$1048576,C{row}),\"\")"
+)
+```
+به‌همراه تولیدکنندهٔ کلید:
+```python
+def _t04_key(row):
+    return (
+        row.get("dimensions")
+        or row.get("item")
+        or row.get("cargo_description")
+        or ""
+    )
+```
+چرا مهم: اگر خروجی `_t04_key` در دو شیت یکسان نباشد، ستون I همیشه صفر می‌شود.
+
+13.12 تنها بازنویسی مجاز فرمول
+```python
+formula = f"=SUM({column_letter}{start_row}:{column_letter}{last_data_row})"
+target.value = formula
+```
+چرا مهم: طبق §13 قوانین طلایی، هر بازنویسی فرمول دیگری ممنوع است.
+
+
+################################################################################
+# 14. وابستگی و ارتباط داخلی توابع
+################################################################################
+
+[Bash]
+  step/log/warn/err ......... مصرف‌کننده: همهٔ STEPها
+  write_utf8 ................ فراخوان: S-02,03,06..14,16,17,20,21 و make_report_json
+  make_report_json .......... فراخوانی می‌کند: write_utf8 | فراخوان: S-05 (۹ بار)
+  site_has_app .............. فراخوان: حلقهٔ S-00
+
+[phase8/events.py]
+  sync_trade_invoice_fields
+      ← فراخوان: hooks doc_events["Trade Case"]["on_update"]
+      → صدا می‌زند: frappe.db.exists، frappe.get_all، frappe.db.set_value
+      ⇢ داده‌ای تولید می‌کند که packing_report و لایهٔ اختصاصی مصرف می‌کنند
+
+[jinja_helpers]
+  fa_date       → fa_digits → format_jalali
+  fa_datetime   → fa_date، fa_digits
+  fa_money      → fa_digits
+  latin_jalali_date → format_jalali
+      ← مصرف‌کننده: report_excel._write_report_table،
+                     report_excel.export_carrier_statement/customs/proforma،
+                     report_excel_custom._transform_date
+  normalize_persian
+      ← مصرف‌کننده: hooks jinja، report_excel_custom._norm
+
+[trade_transport_1405]
+  execute → _get_trade_rows → _get_shipment_totals → _build_report_rows
+          → get_columns → _column
+  ← فراخوانان: report_excel.download_1405،
+                report_excel_custom.export_financial_custom، verify_phase8
+
+[packing_report]
+  execute ← فراخوانان: report_excel.export_packing،
+                       report_excel_custom.export_packing_custom
+
+[report_excel]
+  _guard ................. مصرف‌کننده: هر ۷ endpoint + re-export به custom
+  _new_workbook/_style_header/_autosize/_finalize_table/_send/_report_value
+  _write_report_table → _style_header، _report_value، latin_jalali_date،
+                        _finalize_table
+  download_1405 → _guard، _new_workbook، _write_report_table، _report_value،
+                  _autosize، _send
+  import_proforma_excel → frappe.new_doc("Trade Case").insert
+
+[report_excel_custom]
+  _norm → normalize_persian
+  _alias_keys → _norm، HEADER_ALIASES
+  _find_header_row → _alias_keys، _norm
+  find_header_row_fuzzy → _find_header_row، _build_column_mapping   (بدون فراخوان)
+  _build_column_mapping → _norm، _alias_keys، SyncLog.add
+  _fill_sheet → _find_header_row، _build_column_mapping، _unmerge_data_area،
+                _clear_data_area، _ensure_data_rows، _cell_has_formula،
+                _set_cell_value، _transform_value، _rewrite_sum_formulas،
+                _fill_meta_cells
+  _ensure_data_rows → _copy_row_style، _clone_row_formulas → _shift_formula
+  _load_and_fill_report → _open_template → _find_file
+                        → _get_sheet، _rows_from_report، _apply_title،
+                          _fill_sheet، _restore_hidden_columns، SyncLog.flush
+  export_* → _guard، _fetch_rows → _safe_fields → _has_field،
+             _resolve_link_columns → _resolve_link_smart،
+             _load_and_fill_report، _send
+  export_freight_custom  → _attach_payment_details، _fill_cargo_fallback،
+                           _build_composite_identity
+  export_packing_custom  → _prepare_packing_rows → _resolve_link_smart
+  export_purchase_custom → _t04_key (روی هر دو دیتاست)
+  export_dispatch_custom → _attach_waybill_numbers، _prefer_driver_display
+  import_* → _file_bytes، _pick_sheet، _import_rows، _row_get، _resolve_link،
+             _has_field، _preview_response، Document API
+
+[setup_phase8]
+  setup_phase8 → _cleanup_rejected_phase8_artifacts، _backfill_invoice_fields،
+                 _sync_workspace
+
+[verify_phase8]
+  verify_phase8 → check (تودرتو)، importlib.import_module، inspect.getsource،
+                  هر ۹ execute، _build_report_rows، get_columns
+
+داده تولیدی/مصرفی کلیدی:
+  Trade Case (منبع) → sync_trade_invoice_fields → Transport Case (کپی)
+                    → packing_report / لایهٔ اختصاصی (مصرف)
+  execute() گزارش → _rows_from_report → دیتاست dict → _fill_sheet → سلول قالب
+  _fetch_rows → dict با __row__/__name__ → enrichers → _fill_sheet
+
+
+################################################################################
+# 15. نکات مهم برای تغییر دادن فایل
+################################################################################
+
+M01 تغییر ترتیب/تعداد ستون‌های get_columns() ⇒ چهار نقطه همزمان می‌شکند:
+    _build_report_rows، RUNNING_TOTAL_FIELDS، TEMPLATE_REGISTRY["financial"]،
+    و ۱۰ assertion ایندکسی verify.
+
+M02 تغییر نام یک گزارش ⇒ باید همزمان عوض شود: نام پوشه (snake_case)،
+    name و report_name در JSON، کلید frappe.query_reports در JS، REPORTS در
+    verify، fixture ترجمه، و workspace_map. در غیر این صورت S-22 یا S-21 می‌افتد.
+
+M03 حذف یا تضعیف _guard ⇒ کل مدل امنیتی هر دو لایهٔ اکسل از بین می‌رود، چون
+    ماژول custom همان تابع را import می‌کند.
+
+M04 تغییر MAX_IMPORT_ROWS / MAX_IMPORT_FILE_SIZE ⇒ اثر همزمان روی هر دو لایه و
+    روی برش SyncLog.flush.
+
+M05 هر تغییر در col/header رجیستری باید با فایل xlsx واقعی هماهنگ باشد؛ در غیر
+    این صورت _find_header_row ردیف اشتباه انتخاب می‌کند و داده در جای غلط می‌نشیند.
+    ضمناً تست‌های سخت‌گیرانهٔ verify (مثل «I2» در protected_cells) می‌افتند.
+
+M06 افزودن field به ستون UNRESOLVED ⇒ نقض آگاهانهٔ قانون طلایی. ترتیب درست:
+    اول فیلد در Meta ایجاد شود، بعد رجیستری، بعد note به‌روز شود.
+
+M07 تغییر _t04_key ⇒ رابطهٔ SUMIFS دو شیت T04 می‌شکند و ستون I صفر می‌شود.
+
+M08 تغییر formula_patterns ⇒ به‌خاطر return زودهنگام در _clone_row_formulas،
+    کلون خودکار سایر فرمول‌ها متوقف می‌شود.
+
+M09 تغییر protected_merges ⇒ خطر unmerge شدن تیتر/هدر/لوگو، چون
+    _unmerge_data_area فقط رنج‌های اعلام‌شده را استثنا می‌کند.
+
+M10 تغییر لنگرهای patch جاوااسکریپت (`}, __("اکسل"));` و
+    `}, __("خروجی"));\n\t}\n});`) ⇒ patch بی‌صدا اعمال نمی‌شود، بدون هیچ خطایی.
+    هر ویرایش دستی روی trade_case.js و trade_case_list.js خطرناک است.
+
+M11 نوشتن هوک جدید داخل بلوک PHASE8_HOOKS_START/END ⇒ در اجرای بعدی پاک می‌شود.
+    باید بیرون بلوک یا در بلوک مارکردار مخصوص فاز خودتان باشد.
+
+M12 تغییر WORKSPACE_FOLDERS یا workspace_map ⇒ باید در S-19 و S-20 هماهنگ بماند.
+
+M13 افزودن Link با link_type="URL" به Workspace ⇒ verify می‌افتد و احتمالاً
+    migrate هم ValidationError می‌دهد.
+
+M14 حذف normalize_persian از hooks یا از jinja_helpers ⇒ verify می‌افتد و
+    _norm در لایهٔ اختصاصی به fallback ضعیف‌تر سقوط می‌کند.
+
+M15 تغییر _mask_sheba ⇒ فقط گزارش پرداخت‌ها را عوض می‌کند؛ توجه کنید که
+    اکسل T02 شبای خام را می‌نویسد (ناهمگونی موجود).
+
+M16 تغییر NOW_TS یا حذف کنترل `changed` در upsert_fields ⇒ diff گیت پرسروصدا و
+    بازنویسی مکرر رکوردهای Frappe.
+
+M17 حذف `|| true` از cp قالب‌ها ⇒ نبود فایل قالب، کل نصب را می‌کشد (رفتار فعلی
+    عمداً غیرکشنده است).
+
+M18 اضافه‌کردن گزارش جدید ⇒ حتماً به REPORTS در verify و به یکی از دو کارت
+    Workspace اضافه شود، وگرنه در دسترس کاربر قرار نمی‌گیرد.
+
+
+################################################################################
+# 16. Unknowns
+################################################################################
+
+U01 ساختار کامل و واقعی Meta پنج DocType (نوع فیلد، اجباری بودن، options).
+    فقط نام فیلدهای مصرف‌شده در SQL/Jinja قابل استنتاج است.
+U02 تعریف کامل Workflow و مجموعهٔ همهٔ workflow_stateها. در فایل فقط
+    Draft، Approved، Completed، Cancelled، Rejected دیده شد.
+U03 محتوای واقعی پنج فایل xlsx کارفرما و صحت مختصات/merge/فرمول اعلام‌شده.
+U04 پیاده‌سازی ir_jalali.utils.jalali.format_jalali و test_jalali.
+U05 وجود واقعی فیلدهای اختیاری: dimensions، delivery_type، other_cost،
+    assigned_user، declaration_number، customs_broker، origin، driver_name،
+    bank_name، notes، net_tonnage، approval_status، approved_by،
+    posting_datetime، reference_no، insurance_amount، sender_name، receiver_name.
+U06 نام دقیق child table روی Transport Case — فقط از `append("payments", ...)`
+    استنتاج شد که «payments» است.
+U07 محتوای فعلی hooks.py بیرون بلوک فاز ۸ و اینکه فازهای ۴..۷ چه هوک‌هایی دارند.
+U08 محتوای فعلی شش Workspace JSON و اعتبار لینک‌های موجودشان.
+U09 نتیجهٔ واقعی bench build / migrate / verify روی دادهٔ زنده.
+U10 وجود نُه نقش نام‌برده در سایت هدف.
+U11 متن کامل سند «PHASE 8 EXCEL SYNC GOLDEN RULES» که فقط با ارجاع §1..§15 در
+    کامنت‌ها به آن اشاره شده است.
+U12 توجیه کسب‌وکاری اعداد ثابت: 10MB، 2000 ردیف، 24/48 ساعت، پورت 13000،
+    عرض ستون 11..35، برش 31 کاراکتری عنوان شیت.
+U13 آیا supplier_factory واقعاً به DocType «Supplier» لینک است یا Data ساده —
+    export با رشته فیلتر می‌کند ولی import با _resolve_link("Supplier") حل می‌کند.
+U14 رفتار openpyxl روی فایل‌های واقعی از نظر فونت فارسی، تصویر، و تنظیمات چاپ.
+
+
+################################################################################
+# 17. Contradictions
+################################################################################
+
+C01 ACTIVE_TRANSPORT_STATES — نام «حالت‌های فعال» را القا می‌کند ولی محتوایش
+    ("Cancelled","Rejected") یعنی حالت‌های غیرفعال است؛ به‌علاوه اصلاً استفاده
+    نمی‌شود و رشته‌ها در SQL literal تکرار شده‌اند.
+    نوع: تناقض نام + کد مرده.  [source: S-06]
+
+C02 شاخهٔ `else severity = _("عادی")` در Stalled Cases غیرقابل دسترس است، چون
+    SQL از پیش `>= minimum_hours` فیلتر کرده.
+    نوع: کد مرده.  [source: S-11]
+
+C03 _backfill_invoice_fields بدون فیلتر workflow اجرا می‌شود، در حالی که
+    sync_trade_invoice_fields عمداً Cancelled/Rejected را کنار می‌گذارد.
+    نوع: دو رفتار متفاوت برای یک هدف.  [source: S-02 vs S-20]
+
+C04 docstring ماژول و _get_sheet تأکید دارند «هرگز شیت را با ایندکس/active انتخاب
+    نکن»، اما _pick_sheet در مسیر import دقیقاً به wb.active سقوط می‌کند.
+    نوع: تناقض مستندات داخلی با منطق اجرا.  [source: S-175]
+
+C05 بخش DONE و docstring مدعی «Sync Log کامل» برای import هستند، ولی هیچ‌یک از
+    دو تابع import شیء SyncLog نمی‌سازد؛ ضمناً SyncLog.unresolved() هرگز فراخوانی
+    نمی‌شود.  نوع: تناقض مستندات با کد + API بلااستفاده.  [source: S-175 + S-END]
+
+C06 importهای بلااستفاده در report_excel_custom: RUNNING_TOTAL_FIELDS و
+    to_persian_digits.  نوع: وابستگی مرده.  [source: S-175]
+
+C07 find_header_row_fuzzy و safe_write_merged_aware — اولی هرگز فراخوانی نمی‌شود
+    (خودِ docstring اذعان دارد «kept for reuse and testing»).
+    نوع: کد بلااستفاده.  [source: S-175]
+
+C08 total_label_cell = "C11" در رجیستری T03 تعریف شده ولی هیچ کدی آن را نمی‌خواند.
+    نوع: پیکربندی مرده.  [source: S-175]
+
+C09 هدر فایل ادعای «Idempotent» دارد؛ upsert_fields واقعاً idempotent است، ولی
+    Report/Print Format/Workspace همیشه NOW_TS تازه می‌گیرند.
+    نوع: ادعای مستندات vs رفتار جزئی.  [source: S-HDR vs S-05/S-15/S-19]
+
+C10 پیام‌های خطای ناهمگون برای یک قانون واحد: لایهٔ استاندارد «حجم فایل نباید
+    بیشتر از ۱۰ مگابایت باشد.» ولی _file_bytes «حجم فایل زیاد است».
+    نوع: تناقض UX بین دو بخش کد.  [source: S-16 vs S-175]
+
+C11 سیاست حریم خصوصی شبا ناهمگون است: payments_report ماسک می‌کند، ولی
+    _attach_payment_details مقدار خام sheba را در ستون «شماره حساب» اکسل T02
+    می‌نویسد و import_freight_custom هم خام ذخیره می‌کند.
+    نوع: تناقض دو بخش کد.  [source: S-12 vs S-175]
+
+C12 کامنت _get_shipment_totals می‌گوید «one non-duplicated shipped quantity»، ولی
+    کد یک SUM ساده روی همهٔ Transport Caseهای آن Trade Case است؛ «عدم تکرار»
+    یعنی «یک ردیف خروجی به‌ازای هر trade_case»، نه حذف رکورد تکراری.
+    نوع: کامنت گمراه‌کننده.  [source: S-06]
+
+C13 در _effective_operational_cost، شاخهٔ ساب‌کوئری چهار هزینه (شامل other_cost)
+    را جمع می‌زند ولی شاخهٔ fallback فقط سه هزینه را. عدم تقارن.
+    نوع: ناسازگاری منطقی احتمالی؛ عمدی بودن آن [Unknown].  [source: S-10]
+
+C14 packing_report در SELECT ستون cargo_description دارد ولی در columns ستون
+    متناظر ندارد؛ تعداد فیلدهای SELECT با تعداد ستون‌های اعلام‌شده برابر نیست
+    (بدون اثر عملی چون data دستی ساخته می‌شود).
+    نوع: ناسازگاری ساختاری بی‌اثر.  [source: S-14]
+
+C15 export_purchase_custom با رشته روی supplier_factory فیلتر می‌کند ولی
+    import_purchase_custom آن را با _resolve_link("Supplier", …, "supplier_name")
+    حل می‌کند؛ لینک بودن واقعی این فیلد در فایل اثبات نشده.
+    نوع: تناقض بالقوه، وابسته به U13.  [source: S-175]
+
+C16 شاخهٔ تزریق لوگو در _load_and_fill_report نوشته شده ولی هر پنج قالب
+    allow_logo_injection=False دارند؛ عملاً کد مرده است، هرچند خودِ کامنت
+    می‌گوید «never remove, inject only when explicitly authorized» که با آن
+    سازگار است.  نوع: کد مشروط غیرفعال.  [source: S-175]
+
+
+################################################################################
+# 18. Verification Report
+################################################################################
+
+• آیا کل فایل بررسی شد؟
+  بله. از شِبانگ تا heredoc FINAL و عبارت «پایان فایل». هر سه پیام حاوی کد در
+  تحلیل لحاظ شدند و نقطهٔ برش پیام‌ها به‌صورت پیوسته بازسازی شد.
+
+• محدودهٔ دقیق بررسی‌شده
+  S-HDR، S-00، S-0B، S-01، S-02، S-03، S-04، S-05، S-06، S-07، S-08، S-09،
+  S-10، S-11، S-12، S-13، S-14، S-15، S-16، S-17، S-175، S-18، S-19، S-20،
+  S-21، S-22، S-23، S-24، S-END.
+
+• تعداد کلاس‌ها : ۱ (SyncLog)  [Fact]
+
+• تعداد توابع و متدها (تفکیکی)
+    Bash ..................................  ۷
+    upsert_fields (نصب) ...................  ۱
+    phase8/events.py ......................  ۱
+    utils/jinja_helpers.py ................  ۷
+    گزارش‌ها (۹ execute + ۷ کمکی) .........  ۱۶
+    api/report_excel.py (۸ کمکی + ۷ API) ..  ۱۵
+    api/report_excel_custom.py ............  ~۴۳ سطح ماژول + ۳ متد کلاس
+                                              + ۳ fallback داخل except
+    setup_phase8.py .......................  ۴
+    verify_phase8.py ......................  ۱ + ۱ تودرتو
+    ────────────────────────────────────────────
+    مجموع تقریبی ...........................  ۹۵ ± ۳   [Inference در شمارش،
+                                              Fact در وجود تک‌تک موارد بخش ۷]
+
+• تعداد importها
+    ابزار شل: ۹ | ماژول پایتون نصب: ۵ | ماژول/نماد runtime: بیش از ۳۰
+    (فهرست کامل در بخش ۴)
+
+• بخش‌های حساس
+    _build_report_rows ، منطق RUNNING_TOTAL_FIELDS ، TEMPLATE_REGISTRY ،
+    _ensure_data_rows ، _unmerge_data_area ، _set_cell_value ،
+    _t04_key + SUMIFS ، ادغام hooks.py ، فیلتر link_type Workspace ،
+    زنجیرهٔ اعتبارسنجی import ، _effective_operational_cost.
+
+• ادعاهای بدون منبع : صفر. هر ادعای رفتاری با [source: S-xx :: symbol] ثبت شده.
+
+• موارد نامشخص : ۱۴ مورد (U01..U14)
+
+• تناقض‌های کشف‌شده : ۱۶ مورد (C01..C16)
+
+• بخش‌هایی که به اطلاعات خارجی نیاز دارند
+    Meta واقعی DocTypeها ، پنج فایل xlsx کارفرما ، ir_jalali ،
+    hooks.py و Workspace JSON فعلی ، نتیجهٔ اجرای زنده ، سند GOLDEN RULES.
+
+• سطح اطمینان کلی سند
+    بالا برای ساختار، نام‌ها، امضاها، ثابت‌ها، SQL، قراردادهای اکسل، مسیرهای خطا
+    و side effectها. متوسط برای شمارش دقیق توابع. Unknown برای رفتار زمان اجرا
+    در محیط واقعی.
+
+
+################################################################################
+# ضمیمهٔ A — کارت مرجع سریع (بازتولید بدون فایل اصلی)
+################################################################################
+
+A.1 قراردادهای پایدار پروژه
+    APP              = transport_ir
+    MODULE           = "Iran Transport"  (پوشه: transport_ir/iran_transport)
+    SITE             = transport-dev.local
+    تقویم            = فقط ir_jalali.utils.jalali.format_jalali
+    نام‌گذاری گزارش   = پوشهٔ snake_case  ⟷  رکورد Title Case
+    نوع گزارش        = Script Report، is_standard="Yes"
+    نُه نقش ثابت      = System Manager، CEO، Financial Manager،
+                        Finance Supervisor، Finance User، Transport Supervisor،
+                        Transport User - Purchase، Transport User - Sales،
+                        Customs Officer
+    نوع پرونده       = "خرید" | "فروش"   (رشتهٔ فارسی دقیق)
+    حالت‌های مرده     = "Cancelled"، "Rejected"
+    نوع پرداخت       = پیش کرایه | کرایه | گمرک | ترخیص | سایر
+    Workspaceها      = ceo_dashboard، finance، iran_transport،
+                        transport_purchase، transport_sales، customs
+    Workspace link   = فقط DocType | Page | Report  (URL ممنوع)
+    مارکر هوک        = # --- PHASE8_HOOKS_START --- / # --- PHASE8_HOOKS_END ---
+    مارکرهای JS      = // PHASE8_CUSTOM_EXCEL_BUTTONS
+                        // PHASE8_CUSTOM_EXPORT_BUTTON
+                        // PHASE8_CUSTOM_TRANSPORT_EXCEL_BUTTONS
+    پوشهٔ قالب        = sites/<site>/private/files/excel_templates/
+    مبدأ قالب        = <script_dir>/excel_client_files یا <app_root>/excel_client_files
+
+A.2 نُه گزارش
+    Trade Transport 1405 | trade_transport_1405 | Trade Case     | total=0
+    Freight Report       | freight_report       | Transport Case | total=1
+    Customs Report       | customs_report       | Transport Case | total=1
+    Tonnage Report       | tonnage_report       | Transport Case | total=1
+    Profit Report        | profit_report        | Trade Case     | total=1
+    Stalled Cases Report | stalled_cases_report | Transport Case | total=0
+    Payments Report      | payments_report      | Transport Case | total=1
+    Daily Summary Report | daily_summary_report | Transport Case | total=1
+    Packing Report       | packing_report       | Transport Case | total=1
+
+A.3 چهار Print Format
+    Trade Case Proforma          → Trade Case
+    Transport Packing List       → Transport Case
+    Transport Waybill Print      → Transport Waybill
+    Transport Weighbridge Print  → Transport Weighbridge
+    حذف‌شده‌های منسوخ: "Waybill Print"، "Weighbridge Print"
+
+A.4 چهارده endpoint اکسل
+    report_excel.download_1405
+    report_excel.export_packing
+    report_excel.export_carrier_statement
+    report_excel.export_customs_statement
+    report_excel.export_proforma
+    report_excel.download_proforma_template
+    report_excel.import_proforma_excel
+    report_excel_custom.export_financial_custom
+    report_excel_custom.export_freight_custom
+    report_excel_custom.export_packing_custom
+    report_excel_custom.export_purchase_custom
+    report_excel_custom.export_dispatch_custom
+    report_excel_custom.import_purchase_custom
+    report_excel_custom.import_freight_custom
+
+A.5 محل دقیق دکمه‌ها در UI  [Fact از S-END و JSها]
+    List «پرونده تجاری»  → گروه «اکسل»: دانلود قالب، ورود پیش‌فاکتور
+                          → گروه «اکسل اختصاصی»: مالی، کرایه، پکینگ، خرید،
+                            ارسال + دو ورودی (خرید، کرایه)
+    List «پرونده حمل»    → گروه «اکسل اختصاصی»: ارسال، کرایه، پکینگ +
+                            ورود لیست کرایه
+    Form «پرونده تجاری»  → گروه «خروجی»: پیش‌فاکتور، اختصاصی (با name=)، خرید
+    Report 1405          → گروه «خروجی»: مالی ۱۴۰۵، اختصاصی، خرید
+    Report Freight       → گروه «خروجی»: صورتحساب باربری، تسویه کرایه، ارسال
+    Report Customs       → گروه «خروجی»: صورتحساب گمرک
+    Report Packing       → گروه «خروجی»: اکسل پکینگ، پکینگ گمرکی اختصاصی
+
+A.6 فهرست فایل‌های تولیدی روی دیسک
+    apps/transport_ir/requirements.txt                            (append)
+    apps/transport_ir/transport_ir/hooks.py                       (merge block)
+    apps/transport_ir/transport_ir/fixtures/translation.json      (merge)
+    .../iran_transport/phase8/{__init__.py, events.py}
+    .../iran_transport/utils/{__init__.py, jinja_helpers.py}
+    .../iran_transport/api/{__init__.py, report_excel.py,
+                            report_excel_custom.py}
+    .../iran_transport/setup_phase8.py
+    .../iran_transport/verify_phase8.py
+    .../iran_transport/doctype/trade_case/{trade_case.json (upsert),
+                            trade_case.js, trade_case_list.js}
+    .../iran_transport/doctype/transport_case/{transport_case.json (upsert),
+                            transport_case_list.js}
+    .../iran_transport/report/__init__.py
+    .../iran_transport/report/<9 dirs>/{<name>.json, <name>.py, <name>.js}
+    .../iran_transport/print_format/<4 dirs>/<name>.json
+    .../iran_transport/workspace/<6 dirs>/<name>.json             (patch)
+    sites/<site>/private/files/excel_templates/{template_*.xlsx,
+                            client_logo.png}                      (copy)
+
+A.7 نقشهٔ استنتاجی فازهای قبل و بعد  [Inference — فقط بر پایهٔ مطالبات فاز ۸]
+    این جدول صرفاً ثبت می‌کند که فاز ۸ از هر فاز چه چیزی «مطالبه» می‌کند؛ هیچ
+    ادعایی دربارهٔ محتوای واقعی آن فازها نمی‌شود.
+
+    phase2       : زیرساخت اپ transport_ir و ماژول Iran Transport و hooks.py
+    phase3       : [Unknown] فقط در فهرست پیش‌نیاز هدر ذکر شده
+    phase4       : هوک‌های موجود در hooks.py که فاز ۸ عمداً حفظشان می‌کند
+    realign_gate : [Unknown]
+    ir_jalali    : اپ مستقل با utils.jalali.format_jalali و test_jalali
+    phase5       : DocType «Trade Case» با حداقل این فیلدها —
+                   case_title، case_type، posting_date، company، customer،
+                   supplier_factory، item، cargo_description، dimensions(?)،
+                   thickness، qty، planned_tonnage، sales_amount،
+                   purchase_amount، initial_costs، freight_cost، customs_cost،
+                   clearance_cost، destination، border، workflow_state،
+                   section_docs
+    phase6       : DocTypeهای «Transport Case»، «Transport Waybill»،
+                   «Transport Weighbridge» و child «Transport Payment»
+                   (parenttype=Transport Case، child table name = payments).
+                   فیلدهای Transport Case: trade_case، posting_date،
+                   waybill_number، driver، driver_name، driver_mobile،
+                   plate_number، carrier، customer، supplier_factory، border،
+                   origin، destination، item، cargo_description، thickness،
+                   qty، weight، planned_tonnage، actual_tonnage، net_weight،
+                   freight_cost، customs_cost، clearance_cost، other_cost،
+                   declaration_number، customs_broker، assigned_user،
+                   workflow_state، section_waybill
+    phase7       : شش Workspace با نام‌های DB «CEO Dashboard»، «Finance»،
+                   «Iran Transport»، «Customs» (+ purchase/sales) و ساختار
+                   links/content
+    phase9+      : برای سازگاری باید — تاریخ فقط از ir_jalali بگیرد؛ گزارش جدید
+                   را در پوشهٔ snake_case با نام Title Case بسازد؛ لینک Workspace
+                   را فقط با link_type ∈ {DocType, Page, Report} اضافه کند؛
+                   گارد نقش را از report_excel._guard reuse کند؛ هوکش را در
+                   بلوک مارکردار مخصوص خودش بنویسد؛ verify مخصوص خودش را با
+                   الگوی check() بسازد؛ و در هر تعامل با قالب‌های اکسل، قوانین
+                   UNRESOLVED / محافظت فرمول / حفظ merge و متن کارفرما را رعایت کند.
+
+################################################################################
+# پایان سند — Technical Specification of setup_phase8.sh (pass 3)
+################################################################################

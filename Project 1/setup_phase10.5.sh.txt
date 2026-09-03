@@ -1,0 +1,122 @@
+====================================================================
+راهنمای فنی فایل: setup_phase10.5.sh  (داخل فایل خودش با عنوان
+"Phase 11 - Multi Shipment Under One Trade Case")
+مسیر: erpnext/setup_phase10.5.sh   (869 خط - مطالعه کامل شد)
+====================================================================
+
+1) نکته‌ی نام‌گذاری مهم (اختلاف نام فایل/عنوان داخلی)
+--------------------------------------------------------------------
+نام فایل روی دیسک `setup_phase10.5.sh` است اما هدر داخل خودِ اسکریپت
+می‌گوید "Phase 11 - Multi Shipment Under One Trade Case" و پسوند
+مسیرهای تولیدشده هم `phase11_multishipment` است. این یعنی شماره‌گذاری
+فازها در طول توسعه‌ی پروژه دست‌کم یک‌بار جابه‌جا شده (آنچه اکنون فاز
+۱۰.۵ نام‌گذاری شده، در واقع منطقاً "فاز ۱۱" اصلی محسوب می‌شده) - این
+باید در طراحی V3 مدنظر باشد تا فازبندی جدید دچار ابهام نشود.
+
+2) هدف کلی
+--------------------------------------------------------------------
+افزودن قابلیت "چند بارگیری زیر یک پرونده‌ی تجاری واحد" کاملاً
+Additive (بدون بازنویسی هیچ Controller/JS قبلی) با یک سرویس مستقل
+(phase11_multishipment/service.py) که تناژ رزروشده/خارج‌شده/باقیمانده
+را روی Trade Case محاسبه و اضافه‌بارگیری (Overloading) را کنترل می‌کند.
+
+3) فیلدهای جدید روی Trade Case (Additive - upsert مشابه فاز ۸)
+--------------------------------------------------------------------
+phase11_tonnage_section (Section Break)
+shipped_tonnage / reserved_tonnage / remaining_tonnage /
+  remaining_capacity (همه Float، read_only، precision=3)
+loading_completed (Check، read_only)
+allow_overloading (Check، permlevel=1 - یعنی فقط کاربرانی با
+  Permission Level 1 که در همین اسکریپت با نقش Financial Manager
+  اضافه می‌شود می‌توانند این فیلد را ببینند/ویرایش کنند)
+
+4) سرویس مستقل (service.py)
+--------------------------------------------------------------------
+get_active_transport_rows(trade_case): تمام Transport Case های مرتبط
+  با وضعیت غیر Cancelled/Rejected را با planned_tonnage/actual_tonnage/
+  net_weight برمی‌گرداند.
+compute_metrics(planned_tonnage, rows): منطق اصلی -
+  reserved = Σ planned_tonnage همه‌ی محموله‌های فعال
+  shipped  = برای هر محموله: اگر actual_tonnage>0 از آن استفاده کن، وگرنه
+             از net_weight/1000 (fallback)
+  remaining_tonnage = max(0, planned - shipped)
+  remaining_capacity = max(0, planned - reserved)
+  loading_completed = ۱ اگر rows موجود و shipped+EPSILON >= planned
+  (EPSILON=0.001 برای مقایسه‌ی اعشاری امن)
+recalculate_trade_case(trade_case): متریک‌ها را با frappe.db.set_value
+  مستقیم (بدون trigger مجدد validate) روی Trade Case می‌نویسد.
+recalculate_on_trade_save(doc, method=None): همان منطق اما هنگام
+  validate خودِ Trade Case (برای نمایش فوری در فرم پیش از ذخیره).
+on_transport_update(doc, method=None): هر تغییر/لغو/حذف روی Transport
+  Case باعث recalculate_trade_case می‌شود (خطاها silent log می‌شوند تا
+  ذخیره‌ی سند اصلی نشکند).
+validate_transport_overloading(doc, method=None): قلب گارد
+  اضافه‌بارگیری - مجموع planned_tonnage تمام محموله‌های فعال دیگر (به‌جز
+  خود سند در حال ویرایش) + تناژ فعلی را با تناژ برنامه‌ریزی‌شده‌ی
+  Trade Case مقایسه می‌کند؛ اگر بیشتر بود و allow_overloading=0، خطای
+  کاملاً فارسی و راهنما می‌دهد.
+validate_allow_overloading(doc, method=None): تغییر این فیلد به ۱ فقط
+  برای System Manager/Financial Manager مجاز است (بررسی نقش با
+  frappe.get_roles).
+get_metrics(trade_case) [@frappe.whitelist]: برای فراخوانی از کلاینت.
+
+5) هوکس Additive با هشدار صریح ضدـ‌بازنویسی
+--------------------------------------------------------------------
+کامنت داخل کد پایتون تولیدشده در هوکس، به‌طور مستقیم به توسعه‌دهندگان
+آینده هشدار می‌دهد: "doc_events در hooks.py یک دیکشنری پایتون است.
+اگر دوباره با doc_events = {...} آن را assign کنید، همه‌ی handlerهای
+فازهای قبلی را overwrite می‌کنید. همیشه merge کنید" - این دقیقاً همان
+اصلی است که در طراحی V3 به‌عنوان یک قانون سراسری ("جلوگیری از اجرای
+موازی Hookهای قدیمی") باید رعایت شود. کد واقعی merge سه حالته
+(None/list/single-value) دقیقاً به همین شکل پیاده شده است.
+
+6) Patch مستقل Backfill (patches/v1_0/phase11_multishipment_backfill.py)
+--------------------------------------------------------------------
+یک بار روی همه‌ی Trade Case های موجود recalculate_trade_case فراخوانی
+می‌شود تا داده‌های قدیمی (پیش از این فاز) هم متریک‌های جدید را داشته
+باشند. ثبت در patches.txt زیر بخش [post_model_sync] با entry دقیق
+`transport_ir.patches.v1_0.phase11_multishipment_backfill`.
+
+7) Client Script مستقل (install_client_script.py)
+--------------------------------------------------------------------
+یک پنل بصری کامل با CSS Inline (نه فایل جدا) روی فرم Trade Case:
+نمایش شارژشده/رزروشده/باقیمانده/ظرفیت رزرو با نوار پیشرفت، و دکمه‌ی
+"حمل جدید" که فقط وقتی workflow_state=="Approved" و loading_completed
+false و remaining_capacity>0.001 است ظاهر می‌شود و با
+frappe.new_doc("Transport Case", {...}) فرم جدید را با مقادیر
+پیش‌فرض (تناژ = ظرفیت باقیمانده) باز می‌کند - این "چند بارگیری" واقعی
+برای کاربر نهایی است. همچنین اگر کاربر نقش لازم را نداشته باشد،
+allow_overloading را read_only می‌کند (لایه‌ی دوم دفاعی سمت کلاینت،
+مکمل گارد سمت سرور).
+
+8) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- append_once(): تابع کمکی بش که با grep -Fq یک مارکر را چک می‌کند و
+  فقط اگر نبود append می‌کند - نسخه‌ی ساده‌تر از الگوی
+  "regex substitution" فازهای دیگر، مناسب برای بلوک‌های خطی کوچک.
+- backfill جدا از منطق runtime: نویسنده عمداً منطق یک‌باره (Backfill)
+  را در patches/ نگه داشته، نه در service.py، تا service.py فقط شامل
+  منطق زنده (Live Logic) باشد.
+
+9) وابستگی‌ها
+--------------------------------------------------------------------
+- کاملاً به Trade Case/Transport Case فاز ۵/۶ وابسته است.
+- پیش‌نیاز اصلی برای مفهوم "چندبارگیری" در سند نیازمندی‌های V3
+  (REQUIREMENTS_MATRIX در پوشه‌ی mid-phases-v3) که موتور اتمیک
+  چندبارگیری (فاز ۱۰.۶) را کامل‌تر بازطراحی می‌کند (قفل تراکنشی
+  SELECT FOR UPDATE، Idempotency Key، انتشار frappe.publish_realtime -
+  هیچ‌کدام در این نسخه‌ی پایه پیاده نشده‌اند).
+
+10) خطرات / نقاط حساس
+--------------------------------------------------------------------
+- این پیاده‌سازی "چندبارگیری" فاقد قفل هم‌زمانی (concurrency lock)
+  است: دو کاربر می‌توانند هم‌زمان دو Transport Case برای همان
+  Trade Case بسازند و از یک شرط رقابتی (Race Condition) عبور کنند،
+  چون validate_transport_overloading کوئری SELECT را بدون FOR UPDATE
+  انجام می‌دهد. این دقیقاً یکی از نقص‌هایی است که فاز ۱۰.۶ نسخه‌ی V3
+  باید حل کند.
+- planned_tonnage به‌عنوان معیار reserved_tonnage استفاده می‌شود، نه
+  فقط تناژ واقعی حمل‌شده - این تفکیک "reserved در برابر shipped" دقیقاً
+  مطابق طراحی پیشنهادی سند V3 است (نکته‌ی مثبت این پیاده‌سازی).
+====================================================================
+END

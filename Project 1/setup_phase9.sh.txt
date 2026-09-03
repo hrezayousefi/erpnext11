@@ -1,0 +1,149 @@
+====================================================================
+راهنمای فنی فایل: setup_phase9.sh  ("PHASE 9 — IR_GATEWAY")
+مسیر: erpnext/setup_phase9.sh   (3110 خط - مطالعه کامل شد)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+ساخت اپ کاملاً مستقل `ir_gateway`: سیستم پیامک/SLA/هشدار با معماری
+پلاگین (مشابه افزونه‌های وردپرس) که SMS Gateway، الگوریتم SLA، موتور
+تشدید هشدار (Escalation) و گزارش روزانه‌ی مدیرعامل را پیاده می‌کند.
+
+2) دو FIX اصلی این نسخه (مستند صریح در هدر فایل)
+--------------------------------------------------------------------
+FIX-1: تراکنش‌های خطا هنگام `bench install-app` به این دلیل که Frappe
+  حین install-app قبل از ساخته شدن جداول DocTypeهای این اپ،
+  sync_fixtures() را اجرا می‌کند و خطای
+  "No module named 'frappe.core.doctype.sms_template'" می‌دهد.
+  راه‌حل ظریف: stash_fixtures()/restore_fixtures() -> تمام
+  fixtures/*.json موقتاً به /tmp/ir_gateway_fixtures_stash منتقل
+  می‌شوند، install-app اجرا می‌شود (بدون فایل فیکسچر، بدون خطا)، سپس
+  فایل‌ها برگردانده می‌شوند و در گام migrate (که جداول را ساخته) واقعاً
+  import می‌شوند.
+FIX-2: ModuleNotFoundError: No module named 'ir_gateway' در مرورگر -
+  چون پردازه‌های web/worker پیش از pip install -e استارت شده بودند و
+  sys.path آن‌ها هیچ اطلاعی از اپ جدید نداشت.
+  راه‌حل: پس از pip install، ابتدا با یک زیرپردازه‌ی پایتون import
+  ir_gateway تست می‌شود؛ اگر شکست خورد یک فایل .pth دستی
+  (zzz_ir_gateway.pth) در site-packages نوشته می‌شود؛ سپس
+  restart_bench_services() تمام پردازه‌های bench start/honcho/frappe
+  worker/scheduler را kill و دوباره nohup می‌کند؛ در پایان یک
+  "HTTP smoke test" واقعی روی /api/method/ping اجرا می‌شود تا اثبات
+  شود دیگر خطای import وجود ندارد.
+
+3) معماری پلاگین SMS (Adapter Pattern)
+--------------------------------------------------------------------
+- sms/base_adapter.py::BaseSMSAdapter (ABC): متدهای انتزاعی
+  get_config_fields، send_sms، send_bulk_sms (پیش‌فرض حلقه روی
+  send_sms)، get_balance، validate_config، test_connection.
+  register_adapter(): یک Lazy Proxy که فقط داخل خودش
+  adapter_registry.register_adapter را import می‌کند - این طراحی
+  عمداً "بدون Circular Import" است (نویسندگان پلاگین از base_adapter
+  دکوریتور را می‌گیرند، اما رجیستری واقعی جای دیگری زندگی می‌کند).
+- sms/adapter_registry.py: discover_adapters() با os.walk پوشه‌ی
+  adapters و importlib.import_module پویا؛ هر خطای import silent-log
+  می‌شود (یک آداپتور خراب کل سیستم را نمی‌شکند)؛ get_adapter،
+  list_adapters (شامل describe/config_fields هر کلاس).
+- دو آداپتور نمونه: generic_http (POST JSON عمومی با هدر Bearer) و
+  kavenegar (API واقعی کاوه‌نگار با entries[0].messageid و
+  account/info.json برای موجودی حساب).
+- sms/sms_service.py::send_sms(): "تنها نقطه‌ی ورود مجاز برای ارسال
+  پیامک" (مستند در README.md اپ). هرگز raise نمی‌کند (try/except دور
+  کل تابع)، منطق retry با max_retry+retry_delay_seconds، پیشوند
+  [TEST→original] در حالت آزمایشی، duplicate guard (alerts/
+  duplicate_guard.py::is_duplicate - پنجره‌ی ۱ ساعته، رویدادهای
+  sla_breached/sla_critical از این قاعده معاف هستند چون باید بتوانند
+  تکرار شوند)، ثبت SMS Alert Log و به‌روزرسانی Notification History
+  روی سند مرجع (حتی اگر سند submit شده باشد - با
+  ignore_validate_update_after_submit).
+
+4) موتور SLA (sla/sla_monitor.py + sla/escalation_engine.py)
+--------------------------------------------------------------------
+- check_all_sla(): زمان‌بندی cron هر ۱۵ دقیقه. با
+  frappe.utils.scheduler.is_scheduler_inactive() (تأکید صریح در کامنت:
+  "is_scheduler_active() DOES NOT EXIST in Frappe v15" - یک باگ واقعی
+  کشف‌شده که مستند شده).
+  evaluate(elapsed_hours, deadline_hours, warning_threshold_percent):
+    normal / warning (>=80% مهلت) / breached (>=100%) / critical
+    (>=200%)
+  برای هر Transport Case فعال در یک SLA Stage Config، اگر سطح
+  warning/breached/critical باشد یک قالب SMS مرتبط پیدا و رندر
+  می‌شود و به گیرندگان escalation_engine ارسال می‌شود.
+- escalation_engine.py::get_recipients(): برای driver_assigned شماره‌ی
+  موبایل خود راننده؛ برای رویدادهای SLA کاربر assigned_user؛ سپس
+  Alert Escalation Rule ها بر اساس event_type+level (نقش‌ها یا کاربران
+  مشخص) - همیشه Administrator/Guest را فیلتر می‌کند
+  (`if user_id in ("Administrator", "Guest"): return None`).
+
+5) گزارش روزانه (alerts/daily_report.py::send_daily_ceo_report)
+--------------------------------------------------------------------
+از SMS Gateway Settings.daily_report_enabled و
+daily_report_recipients (لیست شماره جداشده با خط جدید) خوانده می‌شود؛
+_build_report_data() KPIهای امروز (پرونده فعال، جدید امروز، تکمیل
+امروز، در حال حمل، منتظر بیجک/ترخیص/پرداخت، تناژ کل تکمیل‌شده، پرونده‌ی
+معوق (>۲۴ساعت)، پرترددترین مقصد و کارخانه) را با کوئری‌های SQL Group
+By می‌سازد.
+
+6) DocTypeها (STEP 15)
+--------------------------------------------------------------------
+SMS Gateway Settings (Single؛ اعتبارسنجی: اگر enabled و test_mode
+  باشد test_number الزامی، اگر enabled بدون adapter_id خطا)
+SMS Template (autoname=field:template_name؛ ۱۵ گزینه‌ی event_type)
+SMS Alert Log (autoname=hash؛ فیلدهای reference اختیاری - عمداً غیر
+  الزامی چون گزارش روزانه/پیامک تستی سند مرجع ندارند)
+SLA Stage Config (deadline_hours>0، warning_threshold_percent∈[1,100])
+Alert Escalation Role/User (Table MultiSelect کمکی)
+Alert Escalation Rule (autoname=format:{event_type}-{escalation_level}؛
+  escalation_level∈[1..4]؛ حداقل یک نقش یا کاربر الزامی)
+Notification History (istable=1، فیلدهای read_only)
+
+7) نکته‌ی برجسته‌ی کاربر: fa.csv و ترفند ۴۰۴
+--------------------------------------------------------------------
+STEP 24b به‌طور مستقیم مشکل «404 برای route فارسی» را حل می‌کند:
+  - نام/label/title Workspace به‌صورت ثابت انگلیسی "IR Gateway" نگه
+    داشته می‌شود (نه "درگاه پیامک و هشدار") تا Frappe v15 هنگام ساخت
+    URL از روی slug(title) به‌جای slug(name)، به آدرس نامعتبر فارسی
+    (که در Router قابل حل نیست) نرسد.
+  - ترجمه‌ی نمایشی فارسی به‌طور کامل از طریق فایل استاندارد
+    apps/ir_gateway/ir_gateway/translations/fa.csv انجام می‌شود
+    (رکورد "IR Gateway,درگاه پیامک و هشدار," و ده‌ها رکورد دیگر برای
+    DocType/Select option ها) - این "ترفند fa.csv" همان چیزی است که
+    کاربر صراحتاً در مورد آن پرسیده بود: URL/lookup داخلی انگلیسی و
+    پایدار می‌ماند اما نمایش کاملاً فارسی است چون Frappe سمت UI
+    ترجمه‌ی __() را از fa.csv اعمال می‌کند.
+  - setup_language.py::apply_default_persian(): علاوه‌بر تنظیم زبان
+    سیستم/کاربران به fa، هرگونه Workspace با نام فارسی
+    ("درگاه پیامک و هشدار") را که ممکن است از اجرای اشتباه قبلی مانده
+    باشد صراحتاً پاک می‌کند (force_delete) تا فقط نسخه‌ی انگلیسی
+    "IR Gateway" باقی بماند؛ حتی پوشه‌ی روی دیسک با نام فارسی هم حذف
+    می‌شود (شواهد این‌که تیم واقعاً این باگ ۴۰۴ را تجربه کرده و برایش
+    راه‌حل کامل نوشته است).
+
+8) نکات و ترفندهای جالب دیگر
+--------------------------------------------------------------------
+- doctype_js با نگاشت مستقیم SMS Gateway Settings.js که با
+  list_sms_adapters یک Select پویا از آداپتورهای موجود می‌سازد (UI بر
+  اساس Registry سمت سرور، نه Select ثابت).
+- channels/base_channel.py و زیرپوشه‌های telegram/email: Stub های
+  انتزاعی که عمداً "پیاده‌سازی نمی‌شوند" (BACKLOG صریح) - جای‌گذاری
+  ("slot") معماری برای توسعه‌ی آینده بدون بازنویسی هسته.
+- verify_phase9.py بیش از ۴۰ چک شامل بررسی امضای تابع send_sms با
+  inspect.signature برای اطمینان از وجود recipient_name/recipient_role،
+  بررسی زبان سیستم == fa، بررسی وجود fa.csv، رندر واقعی یک قالب نمونه.
+
+9) وابستگی‌ها
+--------------------------------------------------------------------
+- Transport Case (فاز۶)، ir_jalali (برای format_jalali در
+  template_renderer)، ir_base/transport_ir به‌عنوان required_apps.
+- Custom Field notification_history/notification_history_section روی
+  Transport Case اضافه می‌شود (فیکسچر custom_field.json این فایل).
+
+10) خطرات / نقاط حساس (که در سند V3 صریحاً ذکر شده)
+--------------------------------------------------------------------
+- این فایل موتور SLA اول (`*/15 * * * * check_all_sla`) را نصب
+  می‌کند؛ در فازهای بعدی (mid-phases) یک موتور دوم SLA (hourly
+  run_sla_monitor2) هم اضافه می‌شود که باعث اجرای دو موتور موازی
+  می‌شود - این دقیقاً مشکل شناخته‌شده‌ای است که سند V3 با عنوان
+  "فقط یک موتور SLA" باید حل کند.
+====================================================================
+END

@@ -1,0 +1,91 @@
+====================================================================
+راهنمای فنی فایل: setup_phase3.sh
+مسیر: erpnext/setup_phase3.sh   (468 خط - مطالعه کامل شد)
+====================================================================
+
+1) هدف کلی
+--------------------------------------------------------------------
+دو کار مستقل ولی مکمل انجام می‌دهد:
+  الف) به اپ ir_base یک فیکسچر role.json با ۱۲ نقش سفارشی (Custom Role)
+       اضافه می‌کند (نقش‌ها ساخته می‌شوند، اما هیچ کاربری هنوز ساخته
+       نمی‌شود — این تصمیم صریح مستند شده: "کاربران واقعی در این فاز
+       ساخته نمی‌شوند؛ در فاز مدیریت کاربران جداگانه انجام می‌شود").
+  ب) اسکلت اپ عملیاتی transport_ir را می‌سازد: ماژول iran_transport،
+     یک Workspace خالی (فقط ساختار JSON، بدون هیچ DocType واقعی) و
+     فایل BACKLOG.md.
+
+2) ۱۲ نقش سفارشی (ir_base/fixtures/role.json)
+--------------------------------------------------------------------
+CEO, Financial Manager, Finance Supervisor, Finance User,
+Legal Reviewer, Treasury User, Receivables User, Transport Supervisor,
+Transport User - Purchase, Transport User - Sales, Customs Officer,
+Document Signer
+همه با desk_access=1, is_custom=1, disabled=0.
+این ۱۲ نقش، ستون فقرات کل کنترل دسترسی پروژه در تمام فازهای بعدی است؛
+هر Workflow/DocType/Permission بعدی از همین اسامی دقیق استفاده می‌کند.
+
+3) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- "bench use" پیش از هر bench --site: کامنت صریح در فایل توضیح می‌دهد
+  که این "درس مهمی است که از فاز ۲ یاد گرفتیم" — یعنی نسخه‌ی قبلی این
+  پروژه بدون bench use با مشکل site-context مواجه شده بود؛ اینجا هم
+  bench use اجرا می‌شود و هم به‌صورت fallback از --site استفاده می‌شود.
+- Idempotent Fixture Hook: بلوک fixtures با مارکر
+  `# --- IR_BASE_FIXTURES_START/END ---` فقط اگر از قبل وجود نداشته
+  باشد append می‌شود (چک با grep -q)، برخلاف روش‌های بعدی که ابتدا حذف
+  و سپس بازنویسی می‌کنند — نشان می‌دهد سبک کدنویسی بین فازها به‌تدریج
+  تکامل یافته (فازهای بعدی از regex substitution برای idempotency
+  استفاده می‌کنند که مقاوم‌تر است).
+- Workspace خالی با is_standard=1 و content="[]" ساخته می‌شود؛ این یک
+  "اسکلت File-First" است که در فاز ۴ توسط یک اسکریپت پایتون
+  (setup_workspace_phase4.py) به‌صورت force-sync با محتوای واقعی پر
+  می‌شود — یعنی فاز ۳ عمداً Workspace را خالی می‌گذارد تا اثبات کند
+  ساختار پایه صحیح ساخته شده، سپس فاز ۴ محتوا را روی آن می‌نشاند.
+- BACKLOG.md به‌عنوان سند رسمی "چیزهایی که عمداً بیرون از هسته نگه
+  داشته می‌شوند" ساخته می‌شود (چت سازمانی، نقشه تعاملی، BI خارجی، فرم‌ساز
+  عمومی، WhatsApp با ذکر دلیل صریح "removed due to weak/impractical API
+  fit") - این فایل تا انتهای پروژه (حتی در فازهای خیلی جلوتر) دست‌نخورده
+  باقی می‌ماند و صرفاً append می‌شود.
+
+4) وابستگی‌ها
+--------------------------------------------------------------------
+- Preflight الزامی: وجود apps/ir_base و نبود ساختار اشتباه دولایه
+  (apps/ir_base/ir_base/doctype به‌جای ساختار صحیح) - یعنی این اسکریپت
+  به‌صورت فعال باگ احتمالی فاز ۲ را قبل از ادامه‌ی کار چک می‌کند.
+- خروجی این فاز (اپ transport_ir + ماژول iran_transport + ۱۲ نقش)
+  پیش‌نیاز مستقیم setup_phase4.sh و همه‌ی فازهای بعدی است.
+
+5) ساختار فایلی تولیدشده
+--------------------------------------------------------------------
+apps/ir_base/ir_base/fixtures/role.json          (۱۲ نقش)
+apps/ir_base/ir_base/hooks.py                    (+fixtures block)
+apps/transport_ir/BACKLOG.md
+apps/transport_ir/transport_ir/hooks.py          (required_apps شامل ir_base)
+apps/transport_ir/transport_ir/modules.txt       -> "Iran Transport"
+apps/transport_ir/transport_ir/iran_transport/
+  __init__.py
+  doctype/__init__.py
+  workspace/__init__.py
+  workspace/iran_transport/__init__.py
+  workspace/iran_transport/iran_transport.json   (Workspace خالی)
+
+6) گیت‌های کیفی (Checklist)
+--------------------------------------------------------------------
+[ ] list-apps: frappe, erpnext, ir_base, transport_ir
+[ ] custom roles count == 12
+[ ] Role "Transport User - Purchase" وجود دارد
+[ ] Module Def "Iran Transport" وجود دارد
+[ ] Workspace "Iran Transport" وجود دارد (URL: /app/iran-transport)
+[ ] BACKLOG.md موجود
+[ ] هیچ DocType عملیاتی در این فاز ساخته نشده
+[ ] دو commit گیت جداگانه (ir_base و transport_ir)
+
+7) خطرات / نقاط حساس
+--------------------------------------------------------------------
+- چون نقش‌ها فیکسچر هستند (نه Custom Field/Property Setter)، حذف یا
+  تغییر نام یکی از این ۱۲ نقش در فازهای بعدی معادل شکستن تمام
+  Workflow/Permissionهایی است که بر پایه‌ی نام دقیق این نقش‌ها نوشته
+  شده‌اند؛ به همین دلیل در فازهای بعدی نام این نقش‌ها هرگز تغییر نکرده
+  است (فقط اضافه شده، مثلاً در فاز ۶ چند نقش دیگر).
+====================================================================
+END

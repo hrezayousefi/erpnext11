@@ -1,0 +1,190 @@
+====================================================================
+راهنمای فنی فایل: transport_erp.sh
+(داخل فایل با عنوان "setup_phase12_v2.sh — فاز ۱۲ — فضاهای کاری
+اختصاصی و داشبوردهای مدیریتی — مرکز کنترل عملیات حمل")
+مسیر: erpnext/transport_erp.sh   (3291 خط - مطالعه کامل شد)
+====================================================================
+
+1) نکته‌ی نام‌گذاری مهم
+--------------------------------------------------------------------
+این فایل در ریشه‌ی مخزن با نام عمومی `transport_erp.sh` ذخیره شده، اما
+محتوای داخلی آن دقیقاً "setup_phase12_v2.sh — نسخه‌ی اصلاحی فاز ۱۲"
+است. این فایل، آخرین و کامل‌ترین فاز پایه (v2 اصلاحی روی v1 قبلی) است
+که "مرکز کنترل عملیات حمل" (۵ داشبورد اختصاصی Page-based) را می‌سازد.
+تفاوت با v1 (setup_phase12.sh غیرموجود در این فهرست): تمام
+name/label/title مربوط به Workspace/Page به انگلیسی تبدیل شده تا از
+خطای "صفحه یافت نشد" (۴۰۴) در اثر ساخته‌شدن slug فارسی جلوگیری شود -
+دقیقاً همان الگوی fa.csv که در فازهای ۹ و ۱۰ دیده شد، اینجا برای سومین
+بار و در بزرگ‌ترین مقیاس (۵ صفحه + ۵ Workspace + ده‌ها Shortcut/Card)
+تکرار می‌شود.
+
+2) هدف کلی
+--------------------------------------------------------------------
+ساخت یک ماژول کاملاً مستقل `phase12_workspaces` داخل transport_ir که:
+  ۱) config.py: منبع واحد پیکربندی (مراحل گردش‌کار، SLA هر مرحله،
+     نقش‌ها، ۵ تعریف داشبورد، تعریف ۵ Workspace استاندارد، Number
+     Cardها، Chartها)
+  ۲) api/dashboard.py: موتور داده‌ی تجمیعی امن (بدون SQL خام تزریق‌پذیر،
+     مقاوم در برابر نبود DocType/فیلد)
+  ۳) api/kpi.py: سازگاری با فراخوانی‌های قدیمی/Number Card سفارشی
+  ۴) workspaces.py: ساخت idempotent Number Card/Chart/Workspace
+  ۵) setup.py: نقطه‌ی ورود prepare/execute/verify
+  ۶) CSS+JS اختصاصی (کلاس‌های p12-* برای عدم تداخل با سبک‌های قبلی)
+  ۷) پنج صفحه‌ی Page با route انگلیسی و رندر مشترک از یک موتور جاوااسکریپت
+
+3) config.py — منبع واحد حقیقت
+--------------------------------------------------------------------
+TRANSPORT_FLOW: ۱۴ مرحله (state, label_fa, owner_role_fa, sla_hours,
+  icon) از Draft تا Completed با SLA اختصاصی هر مرحله (مثلاً "ثبت
+  راننده"=۲۴ ساعت، "ترخیص"=۴۸ ساعت).
+TRADE_FLOW: ۷ مرحله مشابه برای Trade Case.
+CLOSE_CHECKLIST: ۱۰ آیتم دقیق (chk_purchase, chk_sales, chk_driver,
+  chk_waybill, chk_weighbridge, chk_bijak, chk_clearance, chk_delivery,
+  chk_payments, finance_approved) - نکته‌ی بسیار مهم: این لیست ۱۰
+  آیتمی دقیقاً همان چک‌لیستی است که سند نیازمندی‌های V3 میان‌فازی
+  می‌خواهد، اما توجه کنید که در Transport Case واقعیِ فاز ۶، فیلدهای
+  chk_purchase و chk_sales اصلاً تعریف نشده‌اند (فقط ۷ چک‌لیست واقعی
+  وجود دارد) - یعنی این فایل امیدوارانه (defensively) یک چک‌لیست ۱۰
+  موردی تعریف می‌کند اما در عمل با in-check `if fieldname in doc`
+  فقط فیلدهای موجود را نمایش می‌دهد؛ سه مورد دیگر (از جمله
+  chk_purchase/chk_sales) در دیتای واقعی حاضر نیستند مگر در فازهای
+  بعدی اضافه شوند.
+DASHBOARDS: دیکشنری پنج‌تایی transport_ops/ceo/finance/customs/
+  commercial با route انگلیسی صریح (transport-ops-dashboard,
+  ceo-command-center, finance-control-center, customs-gateway-desk,
+  commercial-desk-center)، هرکدام با لیست KPI اختصاصی (metric key,
+  label فارسی, icon, tone رنگی, پسوند مثل "تن").
+WORKSPACES: ۵ تعریف کامل Workspace استاندارد با name/label انگلیسی
+  (Transport Control Tower, CEO Command Center, Finance And Treasury,
+  Customs And Gateway, Commercial Desk) شامل shortcuts با stats_filter
+  پویا (فیلتر مستقیم روی workflow_state)، cards (گروه‌بندی لینک‌ها)،
+  number_cards و charts.
+NUMBER_CARDS/CHARTS: ۱۳ Number Card و ۴ Dashboard Chart با پیشوند
+  کلید یکتای "p12_".
+
+4) api/dashboard.py — موتور داده
+--------------------------------------------------------------------
+توابع کمکی امن (defensive): _dt_exists، _has_field، _fields (فیلتر
+  فقط فیلدهای واقعا موجود)، _count/_sum (با try/except بازگشت صفر).
+_metric(name): یک دیسپچر بزرگ if/elif با ~۲۵ متریک از جمله
+  transport_open، transport_in_transit، transport_overdue (با
+  _overdue_cutoff(48) - آستانه ثابت ۴۸ ساعته، نه پیکربندی‌پذیر)،
+  today_loads/today_tonnage، profit_sum/cost_sum/sales_sum،
+  trade_finance_queue، customs_cost_sum، border_count، trade_* معادل‌ها.
+_build_kpi/_build_stages/_build_action_table/_build_focus_case/
+  _build_kanban/_build_destinations/_build_performance/_build_alerts:
+  هر بخش یک "Section" مستقل داشبورد را می‌سازد؛ نگاشت‌شان در دیکشنری
+  _BUILDERS نگه داشته می‌شود و config["sections"] تعیین می‌کند کدام
+  بخش‌ها برای کدام داشبورد رندر شوند.
+get_case_timeline(case, doctype): تایم‌لاین کامل یک پرونده - مراحل
+  done/current/pending، وضعیت SLA (tone: ok/warn/danger با
+  _tone(hours, sla))، چک‌لیست بستن (فقط فیلدهای واقعاً موجود)، progress
+  درصدی.
+smart_search(query): جستجوی هوشمند چند-DocType (Transport Case,
+  Trade Case, Driver, Vehicle, Customer, Transport Waybill) با
+  or_filters پویا بر اساس فیلدهای واقعاً موجود در هر DocType.
+send_reminder(case, doctype, message): ساخت هم‌زمان ToDo + Notification
+  Log + Comment روی سند - هر سه در try/except جداگانه تا شکست یکی
+  مانع دیگری نشود.
+توابع سازگاری قدیمی (get_process_status, get_action_table, get_alerts,
+  get_performance, get_form_progress) که صرفاً Wrapper روی DASHBOARDS
+  ["transport_ops"] هستند - برای حفظ سازگاری با کد/UI قدیمی‌تر که شاید
+  مستقیماً این نام‌ها را صدا می‌زده.
+
+5) workspaces.py — ساخت idempotent
+--------------------------------------------------------------------
+_safe_color(doctype, value): یک تابع بسیار محتاطانه که چک می‌کند مقدار
+  رنگ درخواستی در گزینه‌های واقعی فیلد Select "color" وجود دارد یا نه؛
+  اگر نه، از یک نگاشت fallback (Blue->[Blue,Cyan,Purple]...) نزدیک‌ترین
+  رنگ معتبر را انتخاب می‌کند - جلوگیری از ValidationError روی مقدار
+  رنگ نامعتبر که می‌تواند کل نصب را متوقف کند.
+ensure_number_cards/ensure_charts: هرکدام قبل از ساخت چک می‌کنند
+  DocType و فیلد based_on/group_by واقعاً وجود دارند، وگرنه silently
+  skip (continue) - دفاعی در برابر نصب روی سایتی که هنوز همه‌ی
+  DocTypeها را ندارد.
+ensure_workspaces(cards, charts): برای هر ۵ Workspace: جستجوی سند
+  موجود (با label یا name)، تنظیم icon/public/sequence_id/roles/
+  shortcuts/links/charts/number_cards، سپس _build_content() که بلوک‌های
+  JSON محتوای بصری (header راهنمای ورود به داشبورد اختصاصی با گرادیان
+  رنگی، Number Cardها، Shortcutها، Chartها، Cardها) را می‌سازد.
+
+6) پنج صفحه‌ی Page (write_page bash function)
+--------------------------------------------------------------------
+هر صفحه دو فایل تولید می‌کند: JSON (name=route انگلیسی، roles از
+  متغیرهای R_TRANSPORT/R_CEO/R_FIN/R_CUS/R_COM) و JS
+  (on_page_load/on_page_show که با frappe.require موتور مشترک
+  phase12_dashboard.js را بارگذاری و window.transport_phase12.render
+  را صدا می‌زنند).
+
+7) موتور رندر مشترک (public/js/phase12_dashboard.js)
+--------------------------------------------------------------------
+یک SPA کوچک خانگی، بدون کتابخانه‌ی خارجی:
+  faDigits/comma/num/money: قالب‌بندی اعداد فارسی (میلیارد/میلیون به
+    فارسی، جداکننده‌ی هزارگان با کاراکتر «،»).
+  IRAN_PATH + GEO: یک نقشه‌ی SVG بسیار ساده‌شده‌ی ایران (پلی‌گان با
+    نقاط درصدی) به همراه یک دیکشنری مختصات درصدی ~۳۵ شهر/مرز/کشور
+    همسایه (تهران، بندرعباس، بازرگان، مهران، ...) - نقشه‌ی عملیات حمل
+    با مارکرهای رنگی بر اساس تن‌آژ/وضعیت تأخیر.
+  paint(data): تابع اصلی رندر که بر اساس data.sections کدام بخش‌ها
+    (kpi/stages/action_table/focus_case/kanban/destinations/
+    performance/alerts) نمایش داده شوند تصمیم می‌گیرد.
+  bindSearch(): جستجوی زنده با debounce ۲۸۰ میلی‌ثانیه‌ای که
+    smart_search را صدا می‌زند و نتایج را در یک dropdown نمایش می‌دهد.
+  Auto-refresh: هر ۱۲۰ ثانیه (setInterval) داده‌ی داشبورد را بدون
+    اعلان (silent) رفرش می‌کند مگر کاربر روی فرم Transport Case باشد.
+
+8) موتور UX فرم (public/js/phase12_ux.js)
+--------------------------------------------------------------------
+attach(doctype) روی Transport Case و Trade Case: با فراخوانی
+  get_form_progress یک نوار پیشرفت مرحله‌ای + مسئول + مدت توقف + موعد
+  اقدام + چک‌لیست را بالای فرم prepend می‌کند و اگر tone خطرناک بود
+  frm.dashboard.set_headline_alert قرمز/نارنجی نمایش می‌دهد. دو دکمه‌ی
+  سراسری هم اضافه می‌شود: "مرکز کنترل عملیات حمل" و "ارسال یادآوری به
+  مسئول".
+
+9) translations/fa.csv (سومین و بزرگ‌ترین نمونه‌ی ترفند ۴۰۴)
+--------------------------------------------------------------------
+بلوک additive بین مارکرهای PHASE12 (حذف بلوک قبلی با awk و افزودن
+دوباره - idempotent) شامل بیش از ۴۰ رکورد ترجمه برای نام Workspace،
+عنوان صفحات، برچسب Shortcut، برچسب Card، برچسب لینک، و حتی الگوهای
+Format پویا مانند "{} Active,{} فعال,". اعتبارسنجی خودکار با
+csv.reader پایتون بعد از نوشتن (هر خط باید حداقل ۲ ستون داشته باشد).
+
+10) hooks.py Patch (_hooks_patch.py مستقل)
+--------------------------------------------------------------------
+یک اسکریپت پایتون جداگانه (نه این‌لاین heredoc) که با regex بین
+PHASE12_WORKSPACES_HOOKS_START/END کار می‌کند و app_include_css/
+app_include_js را با الگوی "already list? extend safely" اضافه می‌کند
+(چک NameError برای متغیرهای هنوز تعریف‌نشده - سازگار با هر ترتیب اجرا).
+
+11) نکات و ترفندهای جالب فنی
+--------------------------------------------------------------------
+- بکاپ خودکار hooks.py قبل از هر تغییر: `cp -f hooks.py
+  hooks.py.phase12.bak.$(date +%Y%m%d%H%M%S)` - تنها فایلی از ۱۳
+  فایل بررسی‌شده که این سطح احتیاط را دارد (احتمالاً چون این فاز
+  بزرگ‌ترین ریسک شکستن هوکس قبلی را دارد).
+- trap 'ERR' سراسری که خط دقیق خطا را چاپ می‌کند - بهبود قابلیت دیباگ
+  نسبت به فایل‌های قبلی.
+- ۵ متغیر RUN_MIGRATE/RUN_BUILD قابل override با env var - امکان اجرای
+  جزئی (فقط منطق داده بدون build/migrate) برای دیباگ سریع‌تر.
+
+12) وابستگی‌ها
+--------------------------------------------------------------------
+- به تمام DocTypeهای فاز ۵/۶ (Trade Case/Transport Case) و به نقش‌های
+  فاز ۳ وابسته است.
+- مستقل از فاز ۷ (Workspaceهای tir-* و پنل KPI قدیمی) عمل می‌کند اما
+  هم‌زمان با آن‌ها روی سیستم فعال می‌ماند - یعنی از این فاز به بعد
+  سیستم دارای دو نسل موازی از Workspace/داشبورد مدیریتی است.
+
+13) خطرات / نقاط حساس
+--------------------------------------------------------------------
+- دو موتور KPI موازی (فاز۷: ceo_dashboard_kpi.js + api.ceo_kpi، فاز۱۲:
+  phase12_dashboard.js + phase12_workspaces.api.dashboard) با منطق
+  محاسباتی مشابه اما پیاده‌سازی کاملاً جدا - این دقیقاً مصداق نقض اصل
+  "یک منبع واحد هزینه/KPI" است که سند V3 صراحتاً می‌خواهد یکی شود.
+- آستانه‌ی معوق‌بودن (_overdue_cutoff(48)) در سرتاسر این فایل عددی
+  ثابت (Hardcoded 48 ساعت) است، نه از یک تنظیمات مرکزی خوانده می‌شود -
+  دقیقاً مصداق نقص "عدم ثابت زمانی در موتور" که سند V3 برای فاز ۹.۵
+  ممنوع کرده است.
+====================================================================
+END
