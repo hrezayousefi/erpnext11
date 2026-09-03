@@ -1,0 +1,2528 @@
+بله. بررسی کامل را انجام دادم و نتیجه را به شکلی تنظیم کردم که بتوانی این متن را به یک AI دیگر بدهی و پروژه سوم را **بازسازی‌شده و قابل‌ممیزی** بسازی، نه اینکه دوباره سه پروژه قبلی را با patch روی patch تکرار کنی.
+
+## ۱) وضعیت واقعی مطالعه
+
+در این نوبت سه فایل در اختیار من بود و هر سه را کامل پیمایش کردم:
+
+| نام فایل           | مسیر کامل                    | نوع                     | وضعیت مطالعه     |
+| ------------------ | ---------------------------- | ----------------------- | ---------------- |
+| `output1.txt`      | `/mnt/data/output1.txt`      | متن / Plain Text        | ✅ مطالعه کامل شد |
+| `output2.txt`      | `/mnt/data/output2.txt`      | متن / Plain Text        | ✅ مطالعه کامل شد |
+| `script-02.sh.txt` | `/mnt/data/script-02.sh.txt` | Bash Script در قالب متن | ✅ مطالعه کامل شد |
+
+تعداد خطوط فیزیکی واقعی با `wc -l`:
+
+| فایل               |       خطوط |
+| ------------------ | ---------: |
+| `output1.txt`      |     24,449 |
+| `output2.txt`      |     14,830 |
+| `script-02.sh.txt` |      2,488 |
+| **جمع**            | **41,767** |
+
+برای `script-02.sh.txt` ابزار متنی یک خط نهایی بدون newline را جداگانه حساب می‌کرد، بنابراین شمارش منطقی آن 2,489 بود ولی **خط فیزیکی استاندارد فایل 2,488** است.
+
+همچنین هر سه فایل با UTF-8 بدون خطای decoding خوانده شدند و پیمایش از خط اول تا آخر انجام شد.
+
+### کنترل پوشش
+
+✅ همه فایل‌های موجود در ورودی گفتگو پیدا شدند.
+✅ هیچ‌کدام به علت حجم یا شباهت کنار گذاشته نشدند.
+✅ `output1.txt` شامل ۱۳ اسکریپت تاریخی است.
+✅ `output2.txt` شامل ۱۱ اسکریپت تاریخی است.
+✅ `script-02.sh.txt` یک اسکریپت مستقل نسل سوم است.
+✅ اولین و آخرین خط هر سه فایل کنترل شد.
+✅ هیچ فایل «خوانده‌نشده»، «سطحی» یا «حدسی» در مجموعه سه فایل باقی نمانده است.
+
+فقط یک محدودیت مهم وجود دارد: این سه فایل، **متن‌های آرشیوی پروژه‌ها** هستند، نه یک مخزن Git واقعی که پوشه `.git`، فایل‌های hidden و ساختار فیزیکی آن مستقیماً در اختیار من باشد. بنابراین نمی‌گویم hidden fileهای یک repository واقعی را بررسی کرده‌ام؛ چیزی که واقعاً بررسی شده همین سه فایل کامل است.
+
+---
+
+# ۲) چیزی که واقعاً در سه نسل داریم
+
+ساختار تاریخی سه نسل این‌طور است:
+
+### نسل اول — `output1.txt`
+
+این نسل به‌خصوص از نظر **UX، فرم‌ها، فیلدها، گزارش، Excel، Workspace و dashboard** بسیار ارزشمند است.
+
+در آن نسخه‌ها مواردی مثل:
+
+* `Trade Case`
+* `Transport Case`
+* چک‌لیست‌های حمل
+* راهنمای فرم
+* داشبورد CEO
+* Workspaceهای نقش‌محور
+* Number Card
+* Dashboard Chart
+* Kanban
+* RTL UI
+* گزارش‌های عملیاتی
+* Excel Sync
+* چاپ
+* تقویم شمسی
+* اعتبارسنجی داده‌های ایرانی
+
+وجود دارد.
+
+مثلاً فاز ۷ به یک مشکل واقعی Browser-level برخورد کرده بود: route واقعی Workspace با چیزی که کد قبلی تصور می‌کرد فرق داشت؛ نسخه v4 آن را با تشخیص درست route، bind تأخیری router، retry و watchdog اصلاح کرده بود. 
+
+همچنین فاز ۸/84 یکی از باارزش‌ترین قطعات کل آرشیو است: موتور Excel آن دقیقاً بر قرارداد واقعی Excel تکیه می‌کند؛ coordinate lock، merge، hidden columns، exact header text، formula، style، ambiguity → `UNRESOLVED` و import به صورت `Preview → Validate → Resolve → Commit`. 
+
+### نسل دوم — `output2.txt`
+
+این نسل از نظر **Workflow واقعی و نزدیک‌بودن به فرآیند سازمان** ارزشمندتر است.
+
+به‌خصوص:
+
+* نقش‌ها
+* کاربران واقعی
+* دو CEO هم‌زمان
+* Supervisor Team
+* `requested_by`
+* کارتابل
+* `waiting_supply`
+* چندارزی
+* چندبارگیری
+* ریزفاکتور فروش
+* Factory Shortfall Ledger
+* manual close
+* cartable
+* autosave
+* workflow guards
+
+در script-02 نسل دوم، ساختار چندکاربره از روز اول طراحی شده و دو مدیرعامل هر دو `CEO + Document Signer` هستند؛ Administrator هم عمداً از نقش‌های کسب‌وکاری کنار گذاشته شده است.  
+
+نسل دوم حتی یک نکته مهم را درست فهمیده بود: مجوزها را فقط در سطح DocType تعریف‌کردن کافی نیست؛ باید با `frappe.has_permission(..., user=REAL_USER)` برای کاربر واقعی راستی‌آزمایی شوند.  
+
+---
+
+# ۳) نسل سوم `script-02.sh` چرا باید حفظ شود
+
+فایل سوم، یعنی `script-02.sh` مستقل، اصلاً جایگزین Workflow نیست.
+
+این فایل یک **زیرساخت عمومی اعلان** به نام `iran_notify` است.
+
+این تفکیک معماری کاملاً درست است:
+
+```text
+iran_common
+    ↓
+iran_notify
+    ↓
+iran_trade_erp
+    ↓
+business workflow
+```
+
+خود فایل هم تأکید می‌کند که به Trade Case و حمل و فاکتور وابسته نیست و فقط با یک API عمومی از فازهای بعدی صدا زده می‌شود. 
+
+مهم‌ترین قسمت آن این است:
+
+```python
+from iran_notify import notify
+
+notify(
+    "case.legal_rejected",
+    "Trade Case",
+    doc.name,
+    {"reason": "مدارک ناقص است"}
+)
+```
+
+و همچنین این تضمین‌ها:
+
+* `notify()` نباید خطای اعلان را به save سند اصلی منتقل کند.
+* سند مرجع را نباید دوباره save/reload کند.
+* Administrator و Guest گیرنده نیستند.
+* نبود event/recipient/template باید در log دیده شود.
+* SMS واقعی پیش‌فرض خاموش است.
+* dedup باید در سطح DB enforce شود.
+* hooks باید marker-safe باشند. 
+
+بنابراین:
+
+> **نسل سوم notification را نگه می‌داریم؛ notification نسل دوم را از نو تولید نمی‌کنیم.**
+
+---
+
+# ۴) چرا پروژه‌های اول و دوم شکست خوردند
+
+مشکل اصلی Frappe نبود.
+
+مشکل اصلی این بود:
+
+```text
+AI writes code
+      ↓
+AI writes test for same code
+      ↓
+test uses Administrator / ignore_permissions
+      ↓
+PASS
+      ↓
+browser with real user
+      ↓
+FAIL
+      ↓
+patch
+      ↓
+old behavior breaks
+      ↓
+new patch
+      ↓
+repeat
+```
+
+این یعنی:
+
+> **سیستم از دید برنامه‌نویس سبز بود، ولی از دید انسان قرمز بود.**
+
+حتی در پروژه‌های قبلی شواهد این روش وجود دارد؛ برای مثال تست‌های عملیاتی با `save(ignore_permissions=True)` اجرا می‌شدند، در حالی که آنچه باید ثابت شود این بود که همان کار برای کاربر واقعی مجاز است. 
+
+در نسخه دوم بعضی جاها این مشکل بهتر شده بود و حتی برای `Customer` و `Company` و `Version` و `Driver` از `frappe.has_permission(..., user=...)` استفاده شد؛ این قسمت باید حفظ شود. 
+
+اما هنوز یک اشکال روش‌شناختی پابرجاست:
+
+```text
+وجود DocType =/= قابل استفاده بودن
+وجود Workflow =/= اجرای Workflow
+وجود Permission Row =/= دسترسی کاربر
+وجود API =/= مسیر انسانی
+PASS verify =/= موفقیت واقعی
+```
+
+---
+
+# ۵) مهم‌ترین تصمیم پروژه سوم
+
+پروژه سوم نباید:
+
+> Project 1 + Project 2 + Project 3 را کپی کند.
+
+بلکه باید:
+
+> **Project 1 = منبع UX/Presentation/Excel**
+> **Project 2 = منبع Business Workflow/Domain/Operations**
+> **Project 3 = منبع Notification Infrastructure**
+> **یک معماری جدید = محل مونتاژ نهایی**
+
+باشد.
+
+این تفاوت بسیار مهم است.
+
+---
+
+# ۶) معماری پیشنهادی پروژه سوم
+
+من پیشنهاد می‌کنم ساختار نهایی این باشد:
+
+```text
+Frappe / ERPNext v15
+│
+├── iran_common
+│   ├── validators
+│   ├── Jalali
+│   ├── Persian helpers
+│   ├── setup gate
+│   ├── Settings Manager
+│   └── common UI infrastructure
+│
+├── iran_notify
+│   ├── Notification Event
+│   ├── Notification Dispatch Log
+│   ├── SMS adapters
+│   ├── recipient resolver
+│   ├── dedup
+│   ├── quiet hours
+│   └── notify()
+│
+└── iran_trade_erp
+    ├── organization
+    ├── users / roles
+    ├── master data
+    ├── FX
+    ├── CEO Request
+    ├── Trade Case
+    ├── Trade Case Item
+    ├── Trade Sales Slip
+    ├── Trade Case Loading
+    ├── Transport Case
+    ├── Waybill
+    ├── Weighbridge
+    ├── Bijak
+    ├── Clearance
+    ├── Payments
+    ├── Factory Shortfall Ledger
+    ├── Workflow
+    ├── Cartable
+    ├── Workspaces
+    ├── Dashboard
+    ├── Reports
+    └── Excel Sync
+```
+
+و نه:
+
+```text
+یک notification service داخل iran_trade_erp
+یک notification service داخل script-05
+یک notification service دیگر داخل script-09
+```
+
+این تکرار باید **ممنوع** باشد.
+
+---
+
+# ۷) ترتیب واقعی ساخت پروژه سوم
+
+## Phase 1 — `script-01.sh`
+
+منبع:
+
+```text
+output2.txt
+└── script-01.sh
+```
+
+این فاز را **فریز** کن.
+
+یعنی:
+
+* validators
+* guarded validation
+* Jalali
+* Persian helpers
+* Settings Manager
+* Iran Common Settings
+* Validation Bypass Log
+* Wizard gate
+* ensure_toolbar
+* hooks marker
+
+از همان نسخه نگه داشته شوند. این اسکریپت صراحتاً validators و Jalali و setup gate را در خود دارد. 
+
+اما یک قانون جدید به آن اضافه می‌شود:
+
+> `verify_script01.py` دیگر فقط existence test نیست؛ هر چیزی که «permission» است باید برای user واقعی تست شود.
+
+مثلاً verify فعلی خودش برای بعضی saveها `ignore_permissions=True` استفاده می‌کند. 
+
+پس **کد Phase 1 را نگه می‌داریم، روش Verify آن را اصلاح می‌کنیم.**
+
+---
+
+# ۸) Phase 2 — `iran_notify`
+
+منبع:
+
+```text
+script-02.sh.txt
+```
+
+این فایل نباید با notification نسل دوم ادغام شود.
+
+باید مستقلاً نصب شود.
+
+اجزای قابل حفظ:
+
+### Settings
+
+```text
+Notify Settings
+```
+
+با:
+
+* `master_enabled`
+* `sms_master_enabled`
+* `test_mode`
+* `test_mobile`
+* `default_sms_gateway`
+* `default_cooldown_minutes`
+* `quiet_hours`
+* `health_digest`
+
+### Event
+
+```text
+Notification Event
+```
+
+با:
+
+* `event_key`
+* `event_title`
+* `is_critical`
+* `cooldown_minutes`
+* `send_sms`
+* `send_email`
+* `recipient_roles`
+* `recipient_users`
+* `dynamic_user_field`
+* `dynamic_mobile_field`
+* `internal_body`
+* `sms_body`
+
+### Dispatch Log
+
+```text
+Notification Dispatch Log
+```
+
+برای ثبت:
+
+* event
+* channel
+* recipient
+* reference document
+* status
+* decision reason
+* dedup key
+* provider message ID
+* error detail
+
+### Core
+
+این‌ها را نگه دار:
+
+```python
+notify()
+notify_async()
+```
+
+و:
+
+```text
+renderer
+recipients
+policy
+dedup
+quiet_hours
+dispatcher
+```
+
+کد فعلی `notify()` واقعاً pipeline مشخصی دارد: resolve recipient، policy، preference، dedup، reserve log، dispatch و برگرداندن نتیجه.  
+
+### DB Dedup
+
+این قسمت بسیار باارزش است:
+
+```text
+iran_notify_dedup_key_uniq
+```
+
+و باید حفظ شود؛ چون uniqueness در DB بهتر از «اول چک کن، بعد insert کن» در Python است. 
+
+---
+
+# ۹) Phase 3 — سازمان، نقش‌ها، کاربران و Supervisor
+
+منبع:
+
+```text
+output2.txt
+└── script-02.sh  ← نسل دوم، نه iran_notify
+```
+
+این فایل را باید به عنوان هسته سازمانی پروژه سوم بازسازی کرد.
+
+اجزای ارزشمند:
+
+### Roles
+
+۱۳ نقش را حفظ کن:
+
+```text
+CEO
+Financial Manager
+Finance Supervisor
+Finance User
+Legal Reviewer
+Treasury User
+Receivables User
+Transport Supervisor
+Transport User - Purchase
+Transport User - Sales
+Customs Officer
+Document Signer
+Validation Override
+```
+
+### CEO
+
+دو CEO باید هم‌زمان موجود باشند و هر دو:
+
+```text
+CEO
+Document Signer
+```
+
+باشند. 
+
+### سازمان
+
+اول:
+
+```text
+Warehouse Type = Transit
+```
+
+بعد:
+
+```text
+Company
+Fiscal Year
+Users
+```
+
+به همان ترتیب نسخه دوم. 
+
+### Supervisor Team
+
+این قسمت برای نیاز آینده بسیار مهم است:
+
+```text
+Supervisor Team
+Supervisor Team Member
+max_open_cases
+```
+
+یعنی امروز:
+
+```text
+Finance Supervisor
+   ↓
+Heydari
+```
+
+و فردا:
+
+```text
+Finance Supervisor
+   ├── Heydari
+   └── User B
+```
+
+بدون اینکه workflow مجبور شود به یک username خاص وصل شود.
+
+---
+
+# ۱۰) Phase 4 — Master Data + Identity + FX
+
+منبع:
+
+```text
+output2.txt
+└── script-03.sh
+```
+
+این فاز باید حفظ کند:
+
+```text
+Border
+Carrier
+Customs Broker
+Border Representative
+```
+
+و همچنین:
+
+```text
+nationality
+national_id
+passport_number
+plate_type
+```
+
+برای Iranian / International / Temporary.
+
+در چندارزی، مهم‌ترین بخش برای انتقال:
+
+```python
+company_currency()
+resolve_rate()
+apply_fx()
+guard_rate_change()
+lock_rates()
+get_rate_preview()
+```
+
+است.
+
+ترتیب نرخ نسخه دوم روشن است:
+
+```text
+same currency
+→ Currency Exchange
+→ Treasury fallback فقط USD→IRR
+→ throw
+```
+
+و بعد Submit نرخ باید قفل شود. 
+
+`apply_fx()` نیز باید نرخ را در سطح event محاسبه و منجمد کند، نه اینکه هر بار از نرخ روز دوباره خوانده شود. 
+
+---
+
+# ۱۱) Phase 5 — CEO Request + Trade Case
+
+منبع:
+
+```text
+output2.txt
+└── script-04.sh
+```
+
+اینجا باید **مدل انسانی جدید** را وارد کنی.
+
+مدل نهایی:
+
+```text
+CEO
+  ↓
+CEO Request
+  ↓
+Finance Supervisor
+  ↓
+Assigned Finance User
+  ↓
+Trade Case
+```
+
+فیلدهای کلیدی:
+
+```text
+requested_by
+assigned_user
+case_type
+fulfillment_status
+waiting_supply
+manual_close_reason
+closed_by_user
+closed_on
+```
+
+و کل Trade Case باید در همان ابتدا بفهمد:
+
+> «این پرونده متعلق به کدام مدیرعامل است؟»
+
+نه اینکه بعداً از owner یا current user حدس بزند.
+
+---
+
+# ۱۲) مهم‌ترین تغییر: `requested_by` باید محور اعلان CEO باشد
+
+در نسل دوم هم `requested_by` مبنای recipient قرار گرفته بود؛ این ایده را باید حفظ کنیم. Resolver قدیمی صراحتاً CEO درخواست‌کننده را از `doc.requested_by` پیدا می‌کرد. 
+
+اما در پروژه سوم:
+
+```text
+requested_by
+```
+
+باید **یک invariant دامنه** باشد.
+
+یعنی:
+
+```text
+requested_by MUST be a real System User
+requested_by MUST have CEO role
+requested_by MUST NOT be Administrator
+requested_by MUST NOT be Guest
+```
+
+و هرجایی که لازم است CEO اطلاع بگیرد باید از همین فیلد استفاده شود.
+
+---
+
+# ۱۳) `waiting_supply` باید State واقعی باشد، نه یک توضیح UI
+
+این نیاز در پروژه دوم به درستی دیده شده بود:
+
+```python
+release_waiting_supply()
+```
+
+و:
+
+```python
+manual_close()
+```
+
+وجود داشت. 
+
+در پروژه سوم:
+
+```text
+Draft
+↓
+Finance Supervisor
+↓
+Assigned Finance User
+↓
+[ Waiting for Supply ]
+```
+
+باید واقعاً باعث شود:
+
+* پرونده در حالت توقف بماند.
+* مراحل بعدی بدون supply ادامه پیدا نکنند.
+* کارتابل نشان دهد چرا متوقف شده.
+* دوباره Resume شود.
+* SLA از بین نرود.
+* این توقف با «Rejected» اشتباه نشود.
+
+---
+
+# ۱۴) Phase 6 — Workflow واقعی + برگشت به Finance Supervisor
+
+منبع:
+
+```text
+output2.txt
+└── script-06.sh
+```
+
+این مرحله قلب پروژه سوم است.
+
+چون مسیر واقعی تو این است:
+
+```text
+CEO Request
+    ↓
+Finance Supervisor
+    ↓
+Finance User
+    ↓
+Legal
+    ↓
+Treasury
+    ↓
+...
+    ↓
+Finance Supervisor
+```
+
+و **دقیقاً در نقطه برگشت به Finance Supervisor** باید event زیر اجرا شود:
+
+```text
+trade_case.back_to_finance_supervisor
+```
+
+و recipient:
+
+```text
+Trade Case.requested_by
+```
+
+باشد.
+
+نسل دوم این نیاز را قبلاً به صورت event برای CEO درخواست‌کننده پیاده کرده بود. 
+
+اما در پروژه سوم event را به `iran_notify` منتقل می‌کنیم:
+
+```python
+from iran_notify import notify
+
+notify(
+    "trade_case.back_to_finance_supervisor",
+    "Trade Case",
+    doc.name,
+    {
+        "reason": rejection_reason,
+        "returned_from": current_stage,
+    }
+)
+```
+
+یا در مسیر سنگین:
+
+```python
+notify_async(...)
+```
+
+---
+
+# ۱۵) SMS نباید بخشی از Workflow باشد
+
+این یکی از مهم‌ترین اصول معماری است.
+
+Workflow نباید بگوید:
+
+```python
+send_sms(...)
+```
+
+بلکه:
+
+```python
+notify("trade_case.back_to_finance_supervisor", ...)
+```
+
+و خود `iran_notify` تصمیم بگیرد:
+
+```text
+Internal = always
+SMS = only if send_sms
+Email = only if send_email
+```
+
+این دقیقاً همان معماری نسل سوم است. `Notification Event` نیز فقط یک تصمیم مشخص برای SMS به کاربر می‌دهد. 
+
+---
+
+# ۱۶) Phase 7 — Factory Debt + Manual Close + Shortfall
+
+منبع:
+
+```text
+output2.txt
+└── script-06.sh
+└── script-07.sh
+```
+
+این قسمت از پروژه دوم را **حتماً** نگه دار.
+
+تو یک Business Rule بسیار مهم داری:
+
+```text
+Purchase = 100 ton
+Truck1 = 24
+Truck2 = 24
+Truck3 = 24
+Truck4 = 24
+----------------
+Shipped = 96
+Remaining = 4
+```
+
+پس سیستم نباید بگوید:
+
+```text
+Purchase = completed
+```
+
+بلکه:
+
+```text
+4 ton هنوز بدهی کارخانه است
+```
+
+سناریوی ۹۶ تن در خود نسل دوم تست شده بود و بعد `manual_close` و `Factory Shortfall Ledger` ساخته می‌شد. 
+
+توابعی که باید حفظ شوند:
+
+```python
+manual_close()
+record_shortfall_from_case()
+settle_shortfall()
+factory_debt_summary()
+```
+
+و مدل:
+
+```text
+Factory Shortfall Ledger
+```
+
+باید منبع حقیقت بدهی کارخانه شود.
+
+---
+
+# ۱۷) تسویه بعدی باید بدهی قبلی را صفر کند
+
+این قسمت نیز قبلاً درست طراحی شده بود:
+
+```python
+settle_shortfall(...)
+```
+
+با الزام:
+
+* reference یا note
+* user who settled
+* settlement timestamp
+* status = settled
+
+
+
+بنابراین Dashboard باید مثلاً:
+
+```text
+کارخانه A
+طلب از کارخانه: 18.500 ton
+```
+
+و بعد از جبران:
+
+```text
+باز: 0
+```
+
+نشان دهد.
+
+---
+
+# ۱۸) Phase 8 — Multi-Item + N Loading + Sales Split
+
+منبع:
+
+```text
+output2.txt
+└── script-07.sh
+```
+
+این یکی از قوی‌ترین قسمت‌های نسل دوم است.
+
+مدل نهایی:
+
+```text
+Purchase Invoice
+    ├── Item A 50t
+    ├── Item B 30t
+    └── Item C 20t
+          ↓
+      N Loadings
+          ↓
+      N Sales Slips
+```
+
+هر Sales Slip باید مستقل باشد:
+
+```text
+buyer
+price
+currency
+tonnage
+```
+
+و هر Loading:
+
+```text
+planned_tonnage
+actual_tonnage
+sales_slip
+trade_item
+```
+
+داستان concurrency نیز باید حفظ شود.
+
+در نسل دوم برای `Trade Case Loading` کلید idempotency یکتا در DB تعریف شده بود. 
+
+این را حذف نکن.
+
+---
+
+# ۱۹) قانون Concurrency پروژه سوم
+
+این قانون باید در prompt صریح باشد:
+
+> هرجا موجودی/تناژ باقی‌مانده از چند درخواست هم‌زمان تغییر می‌کند، اولویت با transaction و DB locking است، نه Python-level check.
+
+یعنی:
+
+```text
+read remaining
+→ lock relevant rows
+→ calculate
+→ write
+→ commit
+```
+
+نه:
+
+```python
+if remaining >= requested:
+    create_loading()
+```
+
+چون دو request هم‌زمان می‌توانند هر دو همان remaining را ببینند.
+
+---
+
+# ۲۰) Phase 9 — Transport Operations
+
+منبع اصلی:
+
+```text
+output1.txt
+└── setup_phase6.sh
+```
+
+و بخش‌های متناظر نسل دوم.
+
+این قسمت از Project 1 را من **به‌عنوان UX و Operational model** نگه می‌دارم.
+
+DocTypeهای ارزشمند:
+
+```text
+Transport Case
+Transport Waybill
+Transport Weighbridge
+Transport Bijak
+Transport Clearance
+Transport Payment
+```
+
+و فیلدهای چک‌لیست:
+
+```text
+chk_waybill
+chk_weighbridge
+chk_bijak
+chk_clearance
+chk_delivery
+chk_payments
+```
+
+این ساختار در پروژه اول صریحاً وجود داشت. 
+
+همچنین validationهای operational مثل:
+
+* رسید تخلیه
+* باسکول
+* ترخیص
+* payment
+* duplicate payment
+* other_cost + description
+
+ارزش حفظ دارند. 
+
+---
+
+# ۲۱) Phase 10 — UX، Workspaces، Cartable و Dashboard
+
+اینجا باید **Project 1 + Project 2** با هم مونتاژ شوند.
+
+### از Project 1 بردار:
+
+* Workspaces
+* card layout
+* dashboards
+* CEO KPI
+* icons
+* CSS
+* RTL
+* mini chart
+* list shortcuts
+* role-based workspace
+* progress bar
+* operational visualization
+
+Project 1 حتی به‌صورت عملی bug مربوط به Workspace route و render شدن KPI را اصلاح کرده بود، نه صرفاً وجود JS. 
+
+### از Project 2 بردار:
+
+* Cartable
+* stage mapping
+* assigned work
+* timeline
+* real user routing
+* autosave
+* چندکاربره بودن role
+* current-user filtering
+
+---
+
+# ۲۲) مدل Cartable نهایی
+
+برای هر کاربر:
+
+### Heydari
+
+باید وقتی وارد می‌شود ببیند:
+
+```text
+کارتابل من
+
+پرونده‌های ارجاع‌شده به من: 7
+
+[1] خرید میلگرد - در انتظار تأمین
+[2] فروش ورق - بررسی مدارک
+[3] خرید سیمان - برگشت از حقوقی
+...
+```
+
+نه:
+
+```text
+Trade Case
+47 records
+```
+
+این تفاوت اصلی پروژه سوم است.
+
+---
+
+# ۲۳) CEO Workspace
+
+برای CEO باید دو سطح داشته باشیم:
+
+### میز CEO
+
+```text
+دستورهای من
+پرونده‌های من
+وضعیت خرید
+وضعیت فروش
+پرونده‌های برگشتی
+اعلان‌های من
+```
+
+### KPI
+
+```text
+پرونده‌های باز
+در انتظار تأمین
+در حمل
+تکمیل‌شده
+بدهی کارخانه
+سود
+```
+
+و KPI باید از API server-side بیاید؛ Project 1 همین جهت را بعد از مشکلات UI به سمت یک API تجمیعی برده بود. 
+
+---
+
+# ۲۴) Phase 11 — Excel و Reports
+
+اینجا **Project 1 را باید جدی‌تر از Project 2 ببینی.**
+
+منبع اصلی:
+
+```text
+output1.txt
+└── setup_phase84.sh
+```
+
+و نسخه بازسازی‌شده آن در:
+
+```text
+output2.txt
+└── script-08.sh
+```
+
+Project 2 حتی گزارش ممیزی برای انتقال موتور Excel دارد و صراحتاً گفته:
+
+* موتور Preview→Commit
+* ۵ قالب
+* exact wording
+* merge
+* hidden columns
+* coordinate lock
+* ambiguity → UNRESOLVED
+
+از Project 1 منتقل شوند. 
+
+قاعده نهایی:
+
+```text
+Excel Template
+      ↓
+JSON contract
+      ↓
+coordinate
+      ↓
+matching
+      ↓
+validation
+      ↓
+preview
+      ↓
+resolve
+      ↓
+commit
+```
+
+و:
+
+```text
+Never:
+guess
+rewrite client wording
+destroy merges
+change formulas
+overwrite original
+```
+
+این قسمت را تقریباً **طلایی و منجمد** در نظر بگیر. 
+
+---
+
+# ۲۵) یک نکته مهم درباره `hooks.py`
+
+از هر دو پروژه باید این الگو را حفظ کنی:
+
+```text
+MARKER SAFE MERGE
+```
+
+مثلاً:
+
+```python
+# --- SCRIPT07_HOOKS_START ---
+...
+# --- SCRIPT07_HOOKS_END ---
+```
+
+و هیچ فازی حق ندارد:
+
+```text
+hooks.py را کامل بازنویسی کند
+```
+
+Project 2 دقیقاً از این روش استفاده می‌کرد. 
+
+این یکی از تفاوت‌های بسیار مهم بین «اسمبل مهندسی‌شده» و «AI patching» است.
+
+---
+
+# ۲۶) قواعدی که باید از اینجا به بعد اجباری باشند
+
+## قانون ۱ — Administrator فقط برای نصب
+
+`Administrator` می‌تواند:
+
+* install
+* migrate
+* seed
+* create roles
+* create fixtures
+
+انجام دهد.
+
+ولی Administrator هرگز نباید معیار این سؤال باشد:
+
+> آیا Heydari می‌تواند این کار را انجام دهد؟
+
+---
+
+## قانون ۲ — `ignore_permissions=True` در production business flow ممنوع
+
+استثنا:
+
+```text
+installer
+migration
+fixture
+seed
+controlled cleanup
+```
+
+ولی هر business behavior باید بدون آن تست شود.
+
+---
+
+## قانون ۳ — هر فاز باید Human Acceptance داشته باشد
+
+نه فقط:
+
+```text
+DocType exists
+Workflow exists
+API exists
+```
+
+بلکه:
+
+```text
+Real user logs in
+→ sees workspace
+→ sees cartable
+→ opens document
+→ can/cannot edit exactly as expected
+→ action appears
+→ transition occurs
+→ next user gets task
+→ previous user loses task
+```
+
+---
+
+# ۲۷) قانون طلایی تست پروژه سوم
+
+برای هر workflow باید یک **User Matrix** وجود داشته باشد.
+
+مثلاً:
+
+| کاربر          | مرحله   | انتظار                          |
+| -------------- | ------- | ------------------------------- |
+| CEO Karmian    | درخواست | Create Request                  |
+| CEO Yousefi    | درخواست | Create Request                  |
+| Nahalparvar    | ارجاع   | Assign Heydari                  |
+| Heydari        | پرونده  | Create/park/process             |
+| Pouya          | حقوقی   | Review                          |
+| Atieh          | خزانه   | Treasury approval               |
+| Nahalparvar    | برگشت   | Receive completed/rejected case |
+| CEO            | اطلاع   | SMS only                        |
+| Transport user | حمل     | Waybill/loading                 |
+| Customs        | ترخیص   | Clearance                       |
+
+و برای هر خانه باید مشخص شود:
+
+```text
+Visible?
+Readable?
+Editable?
+Can Submit?
+Can Transition?
+Can Print?
+Can Export?
+```
+
+---
+
+# ۲۸) تست طلایی End-to-End پروژه سوم
+
+سناریوی اصلی باید این باشد:
+
+```text
+Karmian
+   ↓
+Create Purchase/Sale Order
+   ↓
+requested_by = Karmian
+   ↓
+Nahalparvar sees task
+   ↓
+Nahalparvar assigns Heydari
+   ↓
+Heydari sees task
+   ↓
+Heydari opens Trade Case
+   ↓
+Case belongs to Karmian
+   ↓
+Heydari chooses:
+    continue
+    OR waiting_supply
+   ↓
+Legal
+   ↓
+Treasury
+   ↓
+other approvals
+   ↓
+return to Nahalparvar
+   ↓
+iran_notify.notify(...)
+   ↓
+Karmian gets internal + optional SMS
+   ↓
+Nahalparvar prints Sepidar form
+   ↓
+CEO signs externally
+   ↓
+Transport
+   ↓
+Waybill
+   ↓
+Weighbridge
+   ↓
+Bijak
+   ↓
+Clearance
+   ↓
+Unload
+   ↓
+Payment
+   ↓
+Close
+```
+
+این باید **معیار اصلی قبولی سیستم** باشد، نه اینکه ۲۰۰ DocType سبز شوند.
+
+---
+
+# ۲۹) سه سناریوی کسب‌وکاری اجباری
+
+### سناریو A — خرید اول
+
+```text
+Purchase
+→ Supply
+→ Loading
+→ Sales split
+→ Delivery
+→ Payment
+→ Close
+```
+
+### سناریو B — فروش اول
+
+```text
+Sales
+→ Waiting for Supply
+→ Purchase
+→ Loading
+→ Delivery
+→ Payment
+→ Close
+```
+
+### سناریو C — shortfall
+
+```text
+100t Purchase
+→ 24 + 24 + 24 + 24
+→ 96t
+→ 4t remaining
+→ Manual Close
+→ Factory Shortfall Ledger = 4
+→ later settlement
+→ Open = 0
+```
+
+نسل دوم همین منطق 96/4 را تست کرده بود. 
+
+---
+
+# ۳۰) هشدار درباره چند قسمت از فایل‌ها که نباید کورکورانه کپی شوند
+
+## الف) `script-00` نسل دوم
+
+در توضیحات نوشته شده که password نباید hardcode باشد، اما خود فایل واقعاً:
+
+```bash
+MYSQL_ROOT_PASSWORD="as12"
+ADMIN_PASSWORD="as12"
+```
+
+دارد.
+
+یعنی comment و implementation با هم سازگار نیستند. بنابراین **این قسمت را کپی نکن**.  
+
+---
+
+## ب) Verifyهای قدیمی
+
+هر Verify که نتیجه‌اش را با:
+
+```python
+save(ignore_permissions=True)
+insert(ignore_permissions=True)
+```
+
+ثابت می‌کند، به‌عنوان **installation test** قابل استفاده است، نه human acceptance test.
+
+---
+
+## ج) Notification قدیمی
+
+`script-05.sh` نسل دوم را به‌عنوان notification core جدید استفاده نکن.
+
+فقط موارد business-level آن را استخراج کن:
+
+* event taxonomy
+* SLA level
+* escalation rules
+* recipient intent
+
+ولی runtime engine را بده به:
+
+```text
+iran_notify
+```
+
+---
+
+## د) Notification نسل سوم
+
+خود `iran_notify` هم هنوز یک زیرساخت کامل Production Messaging Gateway نیست.
+
+مثلاً Kavenegar در فایل به عنوان adapter نمونه آمده و خودش هم می‌گوید endpoint/config را قبل از استفاده واقعی با مستندات درگاه تطبیق بده. پس آن قسمت را «adapter example» بدان، نه integration نهایی. 
+
+همچنین secretهای provider نباید در نهایت مثل یک JSON معمولی در UI نگه داشته شوند.
+
+---
+
+# ۳۱) قانون دیگری که باید به AI بدهی
+
+هیچ AI نباید این کار را بکند:
+
+```text
+"قبلاً این تابع تقریباً همان کار را می‌کرد، دوباره مشابهش را نوشتم."
+```
+
+در عوض باید قبل از ایجاد هر تابع بگردد:
+
+```text
+Function Search
+DocType Search
+Hook Search
+API Search
+JS handler Search
+Report Search
+Workflow action Search
+```
+
+و نتیجه را در:
+
+```text
+CODE REUSE MAP
+```
+
+ثبت کند.
+
+مثلاً:
+
+```text
+requested_by
+├── script-04: canonical field
+├── script-05: old recipient resolver
+├── script-06: workflow return
+└── script-02 gen3: dynamic_user_field support
+
+FINAL:
+requested_by = canonical business source
+iran_notify dynamic_user_field = implementation mechanism
+```
+
+---
+
+# ۳۲) نقشه مونتاژ نهایی
+
+| فاز پروژه سوم | منبع اصلی                        | چه چیزی برداشته شود                                        |
+| ------------- | -------------------------------- | ---------------------------------------------------------- |
+| 1             | `output2 → script-01.sh`         | iran_common کامل                                           |
+| 2             | فایل مستقل `script-02.sh`        | iran_notify کامل                                           |
+| 3             | `output2 → script-02.sh` نسل دوم | roles/users/company/supervisor/master permissions          |
+| 4             | `output2 → script-03.sh`         | master data + identity + FX                                |
+| 5             | `output2 → script-04.sh`         | Trade Case + CEO Request + waiting supply                  |
+| 6             | `output2 → script-06.sh`         | workflow + guards + factory debt + CEO return notification |
+| 7             | `output2 → script-07.sh`         | sales split + loading + concurrency + idempotency          |
+| 8             | `output1 → setup_phase6.sh`      | Transport operations model                                 |
+| 9             | `output1 → setup_phase7.sh`      | Workspace/dashboard/CEO UI                                 |
+| 10            | `output2 → script-09.sh`         | cartable/autosave/timeline/dashboard                       |
+| 11            | `output1 → setup_phase84.sh`     | Excel + reports + templates                                |
+| 12            | `output2 → script-10.sh`         | acceptance scenarios، ولی با بازنویسی verification         |
+| —             | `output2 → script-05.sh`         | فقط event/SLA business concepts؛ **نه notification core**  |
+
+---
+
+# ۳۳) و حالا متن اصلی که باید به AI دیگر بدهی
+
+متن زیر را طوری نوشته‌ام که AI دیگر نتواند با روش «DocType ساختیم، PASS شد» کار را تمام‌شده اعلام کند.
+
+# MASTER PROMPT — ساخت کامل پروژه سوم Iran Trade ERP بر اساس سه نسل قبلی
+
+تو به‌عنوان **Senior Software Engineer + Senior Frappe/ERPNext v15 Engineer + Code Auditor + Business Workflow Architect** مسئول ساخت پروژه سوم Iran Trade ERP هستی.
+
+این پروژه باید از سه نسل قبلی **بازسازی و اسمبل مهندسی‌شده** شود، نه کپی کور، نه patch-chain و نه بازتولید مستقل قابلیت‌هایی که قبلاً وجود دارند.
+
+## 1. منابع قطعی
+
+سه منبع در اختیار تو قرار دارد:
+
+1. `output1.txt`
+
+   * آرشیو نسل اول پروژه
+   * منبع اصلی UX، فرم‌ها، فیلدها، hidden/default fields، Workspaces، Dashboard، Reports، Excel، Print و Transport UI
+
+2. `output2.txt`
+
+   * آرشیو نسل دوم پروژه
+   * منبع اصلی Workflow، کاربران، نقش‌ها، Supervisor، CEO Request، requested_by، waiting_supply، چندارزی، چندبارگیری، Sales Split، Factory Shortfall، Cartable و autosave
+
+3. `script-02.sh`
+
+   * نسل سوم Notification Infrastructure
+   * اپ مستقل `iran_notify`
+
+## 2. قانون مطلق مطالعه
+
+قبل از هر تغییر، باید تمام منابع را کامل مطالعه کنی.
+
+برای هر فایل:
+
+* از اولین خط تا آخرین خط بخوان.
+* اگر بزرگ است بخش‌بندی کن، ولی هیچ بخشی را حذف نکن.
+* فقط نام فایل یا header کافی نیست.
+* هیچ قابلیت را به دلیل شباهت، قدیمی بودن یا حدس کنار نگذار.
+* اگر چیزی را نتوانستی بخوانی، آن را صریحاً گزارش کن.
+* قبل از اعلام completion باید file coverage کامل باشد.
+
+## 3. اصل معماری
+
+پروژه سوم باید این معماری را داشته باشد:
+
+`iran_common → iran_notify → iran_trade_erp`
+
+### iran_common
+
+زیرساخت عمومی ایران:
+
+* validators
+* Jalali
+* Persian helpers
+* settings
+* validation bypass audit
+* Settings Manager
+* setup wizard gate
+* ensure_toolbar
+* marker-safe hooks
+
+### iran_notify
+
+زیرساخت عمومی اعلان:
+
+* Internal Notification
+* SMS
+* Email
+* Notification Event
+* Notification Dispatch Log
+* recipient resolver
+* dedup
+* quiet hours
+* user preferences
+* adapter registry
+* health digest
+
+### iran_trade_erp
+
+تمام Domain Business:
+
+* organization
+* users
+* roles
+* master data
+* FX
+* CEO Request
+* Trade Case
+* Trade Case Item
+* Sales Split
+* Loading
+* Transport
+* Waybill
+* Weighbridge
+* Bijak
+* Clearance
+* Payments
+* Factory Shortfall
+* Workflow
+* Cartable
+* Dashboard
+* Reports
+* Excel
+
+## 4. فاز 1 — script-01
+
+فایل:
+
+`output2.txt → script-01.sh`
+
+را به‌عنوان Phase 1 نگه دار.
+
+این فاز باید شامل:
+
+* iran_common
+* validators
+* guarded
+* Jalali
+* jinja helpers
+* Iran Common Settings
+* Validation Bypass Log
+* Settings Manager
+* wizard gate
+* ensure_toolbar
+* safe hooks
+
+باشد.
+
+منطق اصلی این فاز را بی‌دلیل بازنویسی نکن.
+
+اما verification آن را اصلاح کن:
+
+وجود DocType یا اجرای موفق با Administrator به‌تنهایی کافی نیست.
+
+## 5. فاز 2 — iran_notify
+
+فایل مستقل نسل سوم Notification را نگه دار و به‌عنوان Phase 2 نصب کن.
+
+قواعد:
+
+* Internal همیشه روشن است.
+* SMS فقط با `send_sms`.
+* SMS واقعی فقط با `sms_master_enabled`.
+* test mode پیش‌فرض روشن.
+* Administrator و Guest هرگز recipient نیستند.
+* dedup باید در DB enforced باشد.
+* notify نباید save سند اصلی را خراب کند.
+* notify نباید document reference را save/reload کند.
+* missing recipient/event/template باید log شود.
+* hooks marker-safe باشند.
+* Notification core نباید به Trade Case وابسته شود.
+
+API عمومی نهایی:
+
+```python
+from iran_notify import notify
+
+notify(
+    "event.key",
+    "DocType",
+    "DOCUMENT-NAME",
+    {"reason": "..."}
+)
+```
+
+و در مسیرهای مناسب:
+
+```python
+notify_async(...)
+```
+
+## 6. فاز 3 — organization
+
+منبع:
+
+`output2.txt → script-02.sh` نسل دوم
+
+این قابلیت‌ها را بازسازی کن:
+
+### Roles
+
+CEO
+Financial Manager
+Finance Supervisor
+Finance User
+Legal Reviewer
+Treasury User
+Receivables User
+Transport Supervisor
+Transport User - Purchase
+Transport User - Sales
+Customs Officer
+Document Signer
+Validation Override
+
+### Users
+
+سیستم باید از روز اول multi-user باشد.
+
+امروز ممکن است Finance Supervisor فقط یک employee داشته باشد.
+
+فردا باید بتواند دو یا چند employee داشته باشد بدون تغییر Workflow.
+
+بنابراین:
+
+`Supervisor Team`
+و
+`Supervisor Team Member`
+
+را حفظ کن.
+
+`max_open_cases` را نیز حفظ کن.
+
+## 7. CEO rules
+
+دو CEO باید هم‌زمان قابل استفاده باشند.
+
+هر دو:
+
+* CEO
+* Document Signer
+
+دارند.
+
+هیچ business role را به Administrator اضافه نکن.
+
+Administrator فقط برای نصب/مدیریت سیستم است.
+
+## 8. Phase 4 — master data + FX
+
+منبع:
+
+`output2.txt → script-03.sh`
+
+حفظ کن:
+
+* Border
+* Carrier
+* Customs Broker
+* Border Representative
+* identity/nationality
+* national ID
+* passport
+* plate type
+* multi-currency
+
+FX باید event-level باشد.
+
+Order:
+
+1. same currency → rate 1
+2. Currency Exchange by posting date
+3. Treasury fallback only where explicitly defined
+4. otherwise error
+
+هیچ نرخ حدسی یا zero rate قابل قبول نیست.
+
+Submit باید rate را lock کند.
+
+Historical document نباید هر بار rate روز را بخواند.
+
+## 9. Phase 5 — CEO Request
+
+منبع:
+
+`output2.txt → script-04.sh`
+
+مدل انسانی اصلی:
+
+CEO
+→ CEO Request
+→ Finance Supervisor
+→ Assigned Finance User
+→ Trade Case
+
+Trade Case باید فیلد:
+
+`requested_by`
+
+داشته باشد.
+
+این فیلد canonical owner of business request است.
+
+قوانین:
+
+* باید real System User باشد.
+* باید CEO باشد.
+* Administrator/Guest ممنوع.
+* هیچ بخش دیگری حق ندارد CEO را از current_user یا owner حدس بزند.
+
+## 10. Finance Supervisor routing
+
+Finance Supervisor نباید پرونده را به username ثابت متصل کند.
+
+ساختار:
+
+`Finance Supervisor → team members`
+
+و امروز:
+
+`Heydari`
+
+فردا:
+
+`Heydari + User B`
+
+باید بدون تغییر workflow کار کند.
+
+Routing باید به role/team assignment متکی باشد.
+
+## 11. Waiting for Supply
+
+این وضعیت حیاتی است.
+
+پرونده ممکن است قبل از تأمین کالا متوقف شود.
+
+در این وضعیت:
+
+* ادامه مراحل ممنوع یا کنترل‌شده باشد.
+* پرونده در cartable باقی بماند.
+* دلیل توقف مشخص باشد.
+* SLA/clock منطقی حفظ شود.
+* Resume کنترل‌شده داشته باشد.
+
+این status را با Rejected اشتباه نکن.
+
+## 12. Workflow اصلی
+
+Workflow نهایی باید:
+
+1. CEO request
+2. Finance Supervisor
+3. Finance User
+4. Waiting for Supply در صورت نیاز
+5. Legal
+6. Treasury
+7. سایر approvalهای اصلی
+8. بازگشت به Finance Supervisor
+9. اطلاع به CEO
+10. چاپ فرم سپیدار بیرون از ERP
+11. امضای CEO
+12. Transport
+
+را پوشش دهد.
+
+## 13. Notification rule اصلی
+
+دقیقاً در نقطه‌ای که پرونده آماده بازگشت به Finance Supervisor است:
+
+`iran_notify.notify(...)`
+
+فراخوانی شود.
+
+Recipient:
+
+`Trade Case.requested_by`
+
+باشد.
+
+Event نمونه:
+
+`trade_case.back_to_finance_supervisor`
+
+پیام باید بتواند وضعیت را بیان کند:
+
+* انجام شد
+* نشد
+* رد شد
+* کدام بخش رد کرد
+* چرا رد کرد
+
+این SMS پاسخی از CEO نمی‌خواهد.
+
+فقط اطلاع‌رسانی است.
+
+## 14. هرگز SMS را داخل Workflow Engine ننویس
+
+اشتباه:
+
+```python
+send_sms(...)
+```
+
+صحیح:
+
+```python
+notify("trade_case.back_to_finance_supervisor", ...)
+```
+
+تمام policy و kill-switch و dedup باید در `iran_notify` باشد.
+
+## 15. Phase 6 — Factory Shortfall
+
+منبع:
+
+`output2.txt → script-06.sh`
+
+حفظ کن:
+
+* manual_close
+* record_shortfall_from_case
+* settle_shortfall
+* factory_debt_summary
+* Factory Shortfall Ledger
+
+سناریوی اجباری:
+
+Purchase = 100 ton
+
+Loadings:
+
+24
+24
+24
+24
+
+Result:
+
+96 shipped
+4 remaining
+
+سیستم نباید invoice را به‌صورت خودکار صفر کند.
+
+کاربر مجاز باید بتواند:
+
+`Manual Close`
+
+کند ولی دلیل اجباری باشد.
+
+بعد:
+
+`Factory Shortfall Ledger = 4 ton`
+
+ساخته شود.
+
+بعداً باید بتوان:
+
+`settle_shortfall`
+
+کرد و بدهی باز به صفر برسد.
+
+## 16. Phase 7 — Multi Item / Multi Loading
+
+منبع:
+
+`output2.txt → script-07.sh`
+
+باید پشتیبانی شود:
+
+یک Purchase Invoice چند کالایی
+
+→ چند Loading
+
+→ چند Sales Slip
+
+هر Sales Slip مستقل:
+
+* buyer
+* tonnage
+* price
+* currency
+
+را دارد.
+
+Loading باید:
+
+* purchase case
+* item row
+* planned tonnage
+* actual tonnage
+* sales slip
+* idempotency key
+
+را مدیریت کند.
+
+## 17. Concurrency
+
+هرجا remaining tonnage یا reservation مشترک است:
+
+Python-only check ممنوع.
+
+باید transaction/locking/DB uniqueness مناسب استفاده شود.
+
+Idempotency key باید در database unique باشد.
+
+## 18. Phase 8 — Transport
+
+منبع اصلی:
+
+`output1.txt → setup_phase6.sh`
+
+و موارد مرتبط نسل دوم.
+
+DocTypes مورد نیاز:
+
+* Transport Case
+* Transport Waybill
+* Transport Weighbridge
+* Transport Bijak
+* Transport Clearance
+* Transport Payment
+
+چک‌لیست‌ها باید حفظ شوند:
+
+* waybill
+* weighbridge
+* bijak
+* clearance
+* delivery
+* payments
+
+Validationهای operational نیز باید حفظ شوند.
+
+## 19. Phase 9 — UX/Workspace/Dashboard
+
+منبع:
+
+`output1.txt → setup_phase7.sh`
+و
+`transport_erp.sh`
+
+از نسل اول بردار:
+
+* Workspaces
+* CEO Dashboard
+* KPI cards
+* visual progress
+* charts
+* role workspaces
+* RTL CSS
+* list shortcuts
+* browser-level fixes
+
+از نسل دوم بردار:
+
+* cartable
+* stage mapping
+* assignments
+* timeline
+* autosave
+* user-specific task list
+
+## 20. مهم‌ترین UX rule
+
+برای هر role این سؤال را پاسخ بده:
+
+وقتی این کاربر امروز login می‌کند چه می‌بیند؟
+
+بعد:
+
+چه پرونده‌ای برای اوست؟
+
+بعد:
+
+چه actionهایی دارد؟
+
+بعد:
+
+بعد از action پرونده کجا می‌رود؟
+
+بعد:
+
+چه کاربری مرحله بعد را می‌گیرد؟
+
+این زنجیره باید برای تمام workflow اجرا شود.
+
+## 21. Phase 10 — Excel/Reports
+
+منبع اصلی:
+
+`output1.txt → setup_phase84.sh`
+
+و بازسازی آن در:
+
+`output2.txt → script-08.sh`
+
+حفظ کن:
+
+* report_excel
+* report_excel_custom
+* five client templates
+* RTL print
+* export
+* import
+* preview
+* validation
+* resolve
+* commit
+* coordinate lock
+* merge preservation
+* hidden columns
+* exact wording
+* formulas
+* ambiguity => UNRESOLVED
+
+اصل:
+
+`Preview → Validate → Resolve → Commit`
+
+Import transactional باشد.
+
+Half-import ممنوع.
+
+Original template هرگز overwrite نشود.
+
+## 22. Naming / Persian URL rule
+
+از نسل دوم:
+
+`naming_guard`
+
+را حفظ کن.
+
+Technical names:
+
+ASCII English
+
+Visible Persian text:
+
+Translation
+
+هرگز برای technical Workspace name از Persian slug استفاده نکن.
+
+## 23. hooks
+
+هر فاز فقط marker خودش را تغییر دهد.
+
+ممنوع:
+
+* overwrite whole hooks.py
+* حذف hook فاز قبلی
+* replace کردن list قبلی
+* hardcoded duplicate hook
+
+از:
+
+`globals().get(...)`
+و marker blocks
+
+استفاده کن.
+
+## 24. Verification architecture جدید
+
+این پروژه دیگر یک verification layer ندارد.
+
+چهار لایه اجباری دارد:
+
+### Layer A — Static
+
+* Python AST
+* JSON parse
+* JS syntax/basic parse where possible
+* duplicate function search
+* imports
+* missing references
+
+### Layer B — Installation
+
+* app installed
+* migrate
+* hooks
+* fixtures
+* assets
+* roles
+* DocTypes
+
+### Layer C — Real User Permission
+
+برای کاربران واقعی:
+
+* CEO1
+* CEO2
+* Finance Supervisor
+* Finance User
+* Legal Reviewer
+* Treasury User
+* Transport User
+* Customs Officer
+* Document Signer
+
+باید permission واقعی را تست کنی.
+
+Administrator معیار business permission نیست.
+
+### Layer D — Human Journey
+
+سناریوها با user واقعی اجرا شوند:
+
+Login
+→ Workspace
+→ Cartable
+→ Open record
+→ Edit
+→ Save
+→ Submit
+→ action
+→ next user
+→ next cartable
+
+## 25. ignore_permissions rule
+
+`ignore_permissions=True` فقط مجاز است برای:
+
+* installation
+* migration
+* fixtures
+* seed
+* controlled cleanup
+* controlled infrastructure creation
+
+برای اثبات اینکه business workflow کار می‌کند، استفاده از آن ممنوع است.
+
+## 26. Verification باید negative case هم داشته باشد
+
+برای هر action حداقل:
+
+* permitted case
+* denied case
+
+وجود داشته باشد.
+
+مثلاً:
+
+Heydari نباید بتواند action حقوقی را انجام دهد.
+
+Legal Reviewer نباید بتواند treasury approval را انجام دهد.
+
+CEO نباید بتواند operational loading را بدون مرحله لازم bypass کند.
+
+## 27. Verification باید Browser-oriented باشد
+
+برای UI این‌ها را بررسی کن:
+
+* workspace opens
+* correct cards visible
+* route correct
+* no 404
+* actions visible only to correct role
+* form sections correct
+* hidden/default fields work
+* autosave works
+* cartable filters current user
+* dashboard loads
+* Excel buttons work
+* print works
+
+“JS file exists” کافی نیست.
+
+## 28. Project 1 را فقط به خاطر جدیدتر/قدیمی‌تر بودن دور نریز
+
+Project 1 برای این اجزا source-of-truth تاریخی است:
+
+* UX
+* forms
+* fields
+* dashboards
+* workspace
+* reports
+* Excel
+* transport UI
+
+Project 2 برای این اجزا source-of-truth تاریخی است:
+
+* workflow
+* user routing
+* business domain
+* multi-currency
+* loading
+* factory debt
+* cartable
+
+Project 3 notification را از `iran_notify` بگیر.
+
+## 29. script-05 نسل دوم
+
+`script-05.sh` را به‌عنوان notification runtime جدید استفاده نکن.
+
+فقط مفاهیم business آن را استخراج کن:
+
+* event taxonomy
+* SLA
+* escalation
+* notification intent
+
+Runtime notification باید فقط در `iran_notify` باشد.
+
+## 30. هیچ function duplicate نساز
+
+قبل از ایجاد function:
+
+1. Search all source files.
+2. Search destination app.
+3. Search hook references.
+4. Search imports.
+5. اگر function مشابه هست:
+
+   * reuse
+   * adapt wrapper
+   * or deliberately replace with documented reason
+
+اما بدون ثبت reason نسخه جدید ننویس.
+
+## 31. برای هر انتقال یک REUSE MAP بساز
+
+برای هر قابلیت:
+
+```text
+CAPABILITY
+SOURCE
+FUNCTIONS
+DEPENDENCIES
+DESTINATION
+CHANGES
+VERIFICATION
+```
+
+مثلاً:
+
+```text
+Capability: Factory Shortfall
+
+Source:
+output2.txt / script-06.sh
+
+Functions:
+manual_close
+record_shortfall_from_case
+settle_shortfall
+factory_debt_summary
+
+Destination:
+iran_trade_erp.iran_trade...
+
+External dependency:
+Trade Case
+Trade Case Item
+Finance Supervisor role
+
+Verification:
+100 -> 24+24+24+24 -> 4 shortfall -> settlement
+```
+
+## 32. هیچ “PASS” را بدون دلیل قبول نکن
+
+برای هر PASS ثبت کن:
+
+```text
+WHAT
+WHO
+WHERE
+UNDER WHICH USER
+WITH WHICH PERMISSIONS
+WHAT WAS EXPECTED
+WHAT ACTUALLY HAPPENED
+```
+
+## 33. Completion criteria
+
+پروژه فقط وقتی Complete اعلام می‌شود که:
+
+* all source mapping complete
+* all duplicated logic resolved
+* all phases installed
+* all workflows connected
+* all real-user permissions tested
+* all major role journeys tested
+* browser journeys tested
+* notification flow tested
+* SMS kill-switch tested
+* waiting-supply tested
+* multi-item tested
+* multi-loading tested
+* 100→96→4 shortfall tested
+* settlement tested
+* multi-currency tested
+* Excel round-trip tested
+* reports tested
+* dashboard tested
+* cartable tested
+* idempotency tested
+* rerun/idempotency of installers tested
+* no business test relies on Administrator
+* no business verification relies on `ignore_permissions=True`
+
+## 34. ترتیب اجرای نهایی
+
+ترتیب پروژه سوم:
+
+```text
+Phase 1  → script-01.sh / iran_common
+Phase 2  → script-02.sh / iran_notify
+Phase 3  → generation-2 script-02 / organization
+Phase 4  → generation-2 script-03 / master data + FX
+Phase 5  → generation-2 script-04 / CEO Request + Trade Case
+Phase 6  → generation-2 script-06 / workflow + shortfall
+Phase 7  → generation-2 script-07 / sales split + loading
+Phase 8  → generation-1 phase6 / transport operations
+Phase 9  → generation-1 phase7 + transport_erp / UX + dashboard
+Phase 10 → generation-2 script-09 / cartable + autosave
+Phase 11 → generation-1 phase84 + generation-2 script-08 / Excel + reports
+Phase 12 → generation-2 script-10 rewritten / full acceptance
+```
+
+## 35. مهم‌ترین قاعده نهایی
+
+هیچ‌وقت سؤال اصلی را این قرار نده:
+
+> آیا DocType وجود دارد؟
+
+سؤال اصلی باید این باشد:
+
+> امروز Heydari وارد ERPNext می‌شود؛ دقیقاً چه چیزی می‌بیند و چه کاری می‌تواند انجام دهد؟
+
+سپس:
+
+> وقتی ارسال کرد، این پرونده دقیقاً به کدام کاربر می‌رود؟
+
+سپس:
+
+> آن کاربر چه چیزی می‌بیند؟
+
+و همین زنجیره را تا انتهای business process ادامه بده.
+
+## 36. خروجی هر فاز
+
+هر فاز باید این پنج خروجی را تولید کند:
+
+1. Implementation
+2. Reuse Map
+3. Static Verification
+4. Real User Verification
+5. Human Acceptance Scenario
+
+بدون این پنج مورد، فاز Complete نیست.
+
+## 37. مهم‌ترین ممنوعیت
+
+این روش ممنوع است:
+
+```text
+AI writes code
+AI writes test
+AI runs test as Administrator
+AI says PASS
+```
+
+روش مجاز:
+
+```text
+Source study
+→ design
+→ implementation
+→ static check
+→ migration
+→ real-role permission check
+→ browser/user journey
+→ negative case
+→ regression
+→ rerun/idempotency
+→ phase accepted
+```
+
+## 38. خروجی نهایی مورد انتظار
+
+در پایان باید یک Project 3 یکپارچه تحویل بدهی که:
+
+* UX نسل اول را داشته باشد.
+* Workflow نسل دوم را داشته باشد.
+* notification نسل سوم را داشته باشد.
+* architecture تمیز داشته باشد.
+* duplicate infrastructure نداشته باشد.
+* واقعی و multi-user باشد.
+* business permissions واقعی داشته باشد.
+* برای human journey قابل استفاده باشد.
+* Excel و Reports قوی نسل اول را از دست نداده باشد.
+* multi-item / multi-loading / multi-currency نسل دوم را از دست نداده باشد.
+* waiting_supply و factory debt را درست مدل کند.
+* CEO notification دقیقاً بر اساس `requested_by` کار کند.
+
+و مهم‌تر از همه:
+
+**هیچ‌گاه فقط به خاطر سبز بودن تست‌های Administrator اعلام نکن که سیستم آماده است.**
+
+---
+
+## ۳۴) نتیجه مهندسی من
+
+اگر بخواهم خیلی روشن بگویم:
+
+**پروژه سوم را از صفر نساز.**
+
+این کار دوباره همان اشتباه قبلی است.
+
+بهترین مسیر این است:
+
+```text
+Phase 1
+= output2 / script-01
+
+Phase 2
+= generation-3 iran_notify
+
+Phase 3+
+= بازسازی انتخابی output2
+
+UX/Reports/Excel
+= استخراج انتخابی output1
+```
+
+و در این میان **سه چیز را با هم قاطی نکن**:
+
+```text
+Foundation
+Business Domain
+Notification Infrastructure
+```
+
+این تفکیک باعث می‌شود بعداً وقتی Trade Case تغییر کرد، Notification خراب نشود؛ و وقتی UI Dashboard تغییر کرد، Workflow خراب نشود.
+
+یک نکته بسیار مثبت هم در نسل‌های قبلی وجود دارد که ارزش حفظ دارد: Project 1 برای UI به خطاهای واقعی Browser برخورد کرده و آنها را با رفتار runtime اصلاح کرده، و Project 2 در چند بخش از permission واقعی کاربران استفاده کرده و سناریوی 100→96→4 را واقعاً مدل کرده است. یعنی برخلاف تصور اولیه، هر دو پروژه قطعات بسیار ارزشمندی دارند؛ مشکل، **روش ترکیب و روش Verify** بوده است.  
+
+و یک هشدار نهایی: `output2` در بعضی جاها هنوز حتی در Verifyهای جدید از `ignore_permissions=True` استفاده می‌کند، و بعضی تست‌ها را باید در پروژه سوم صرفاً به‌عنوان **installer/infrastructure tests** نگه داشت، نه acceptance واقعی. همچنین در یک بخش از `0.sh` نسل دوم، comment می‌گوید secretها hardcoded نیستند ولی خود کد هنوز `as12` دارد؛ این مورد را نباید وارد پروژه جدید کرد.  
+
+**جمع‌بندی نهایی من: پروژه سوم اگر دقیقاً با این نقشه ساخته شود، دیگر یک «تلاش چهارم برای نوشتن دوباره ERP» نیست؛ یک reconstruction کنترل‌شده از بهترین بخش‌های دو نسل قبلی + زیرساخت اعلان نسل سوم است، با Human Verification به‌عنوان معیار اصلی قبولی.**
